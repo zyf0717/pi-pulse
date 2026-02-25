@@ -1,3 +1,0 @@
-shiny
-httpx
-python-dotenv
