@@ -1,0 +1,13 @@
+name: pi-pulse
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - shiny
+  - plotly
+  - python-dotenv
+  - httpx
+  - pandas
+  - shinywidgets
+  - anywidget
