@@ -10,3 +10,5 @@ dependencies:
   - httpx
   - pandas
   - pyyaml
+  - pip:
+    - shinyswatch

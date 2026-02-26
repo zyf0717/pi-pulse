@@ -1,7 +1,10 @@
 pi-pulse:
-  - http://192.168.121.10:8001/stream
-  - http://192.168.121.11:8001/stream
+  "10":
+    stream: http://192.168.121.10:8001/stream
+  "11":
+    stream: http://192.168.121.11:8001/stream
 
 sen66:
-  - http://192.168.121.11:8002/stream
-  - http://192.168.121.11:8002/nc-stream
+  "11":
+    stream: http://192.168.121.11:8002/stream
+    nc-stream: http://192.168.121.11:8002/nc-stream
