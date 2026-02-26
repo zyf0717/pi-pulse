@@ -9,3 +9,4 @@ dependencies:
   - python-dotenv
   - httpx
   - pandas
+  - pyyaml
