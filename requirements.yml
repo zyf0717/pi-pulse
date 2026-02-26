@@ -12,3 +12,4 @@ dependencies:
   - pyyaml
   - pip:
     - shinyswatch
+    - faicons
