@@ -5,11 +5,10 @@ from collections import deque
 from datetime import datetime
 
 import httpx
-import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 import shinyswatch
 from shiny import reactive, render, ui
+from shinywidgets import render_widget
 
 from config import DEVICES, PULSE_CHARTS, SEN66_DEVICES
 
@@ -157,30 +156,52 @@ def server(input, output, session):
             return "N/A"
         return f"{pulse_latest[dev]().get('temp', 0.0):.1f}°C"
 
-    @render.ui
+    # ── Pulse chart — persistent widget, surgical data updates ─────────────
+    pulse_widget = go.FigureWidget()
+    _pulse_state: dict = {"chart": None, "dev": None, "tpl": None}
+
+    @render_widget
     def temp_graph():
+        return pulse_widget
+
+    @reactive.Effect
+    def _update_pulse_chart():
         dev = input.device()
         chart = input.pulse_chart()
         tpl = plotly_tpl()
+
         if dev not in DEVICES:
-            return ui.p(
-                f"Device {dev} has no Pi Pulse stream.",
-                class_="text-warning mt-3",
-            )
+            return
+
         pulse_latest[dev]()
-        history = pulse_temp_history[dev]
+        history = list(pulse_temp_history[dev])
         if not history:
-            return ui.p("Waiting for data…")
+            return
+
         times = [t for t, _ in history]
         data_rows = [d for _, d in history]
         label = PULSE_CHARTS[chart]
         field = {"cpu": "cpu", "mem": "mem", "temp": "temp"}[chart]
-        df = pd.DataFrame(
-            {"Time": times, label: [d.get(field, 0.0) for d in data_rows]}
+        y_data = [d.get(field, 0.0) for d in data_rows]
+
+        rebuild = (
+            _pulse_state["chart"] != chart
+            or _pulse_state["dev"] != dev
+            or _pulse_state["tpl"] != tpl
         )
-        fig = px.line(df, x="Time", y=label, markers=True, template=tpl)
-        fig.update_layout(margin=dict(l=20, r=20, t=20, b=20))
-        return ui.HTML(fig.to_html(full_html=False, include_plotlyjs="cdn"))
+        with pulse_widget.batch_update():
+            if rebuild:
+                pulse_widget.data = []
+                pulse_widget.add_scatter(
+                    x=times, y=y_data, mode="lines+markers", name=label
+                )
+                pulse_widget.layout.template = tpl
+                pulse_widget.layout.margin = dict(l=20, r=20, t=20, b=20)
+                pulse_widget.layout.yaxis.title = label
+                _pulse_state.update({"chart": chart, "dev": dev, "tpl": tpl})
+            else:
+                pulse_widget.data[0].x = times
+                pulse_widget.data[0].y = y_data
 
     # ── Sen66 value box renders ───────────────────────────────────────────────
     @render.text
@@ -218,18 +239,22 @@ def server(input, output, session):
             return "N/A"
         return f"{sen66_latest[dev]().get('nox_index', 0.0):.1f}"
 
-    # ── Sen66 chart render ────────────────────────────────────────────────────
-    @render.ui
+    # ── SEN66 chart — persistent widget, surgical data updates ──────────────
+    sen66_widget = go.FigureWidget()
+    _sen66_state: dict = {"chart": None, "dev": None, "tpl": None}
+
+    @render_widget
     def sen66_graph():
+        return sen66_widget
+
+    @reactive.Effect
+    def _update_sen66_chart():
         dev = input.device()
         chart = input.sen66_chart()
         tpl = plotly_tpl()
 
         if dev not in SEN66_DEVICES:
-            return ui.p(
-                f"Device {dev} has no SEN66 stream.",
-                class_="text-warning mt-3",
-            )
+            return
 
         if chart == "pm_nc":
             sen66_nc_latest[dev]()
@@ -239,111 +264,145 @@ def server(input, output, session):
             history = list(sen66_history[dev])
 
         if not history:
-            return ui.p("Waiting for data…")
+            return
 
         times = [t for t, _ in history]
         data_rows = [d for _, d in history]
 
-        def _fig(fig):
-            fig.update_layout(margin=dict(l=20, r=20, t=20, b=20))
-            return ui.HTML(fig.to_html(full_html=False, include_plotlyjs="cdn"))
+        rebuild = (
+            _sen66_state["chart"] != chart
+            or _sen66_state["dev"] != dev
+            or _sen66_state["tpl"] != tpl
+        )
+        with sen66_widget.batch_update():
+            if rebuild:
+                sen66_widget.data = []
+                sen66_widget.layout.template = tpl
+                _sen66_state.update({"chart": chart, "dev": dev, "tpl": tpl})
 
-        if chart == "temp_hum":
-            fig = go.Figure()
-            fig.add_trace(
-                go.Scatter(
-                    x=times,
-                    y=[d["temperature_c"] for d in data_rows],
-                    name="Temperature (°C)",
-                    mode="lines+markers",
-                    yaxis="y1",
-                )
-            )
-            fig.add_trace(
-                go.Scatter(
-                    x=times,
-                    y=[d["humidity_rh"] for d in data_rows],
-                    name="Humidity (%RH)",
-                    mode="lines+markers",
-                    yaxis="y2",
-                )
-            )
-            fig.update_layout(
-                template=tpl,
-                yaxis=dict(title="Temperature (°C)"),
-                yaxis2=dict(title="Humidity (%RH)", overlaying="y", side="right"),
-                legend=dict(orientation="h", y=-0.2),
-                margin=dict(l=20, r=60, t=20, b=20),
-            )
-            return ui.HTML(fig.to_html(full_html=False, include_plotlyjs="cdn"))
+                if chart == "temp_hum":
+                    sen66_widget.add_scatter(
+                        x=times,
+                        y=[d["temperature_c"] for d in data_rows],
+                        name="Temperature (°C)",
+                        mode="lines+markers",
+                        yaxis="y1",
+                    )
+                    sen66_widget.add_scatter(
+                        x=times,
+                        y=[d["humidity_rh"] for d in data_rows],
+                        name="Humidity (%RH)",
+                        mode="lines+markers",
+                        yaxis="y2",
+                    )
+                    sen66_widget.layout.yaxis = dict(title="Temperature (°C)")
+                    sen66_widget.layout.yaxis2 = dict(
+                        title="Humidity (%RH)", overlaying="y", side="right"
+                    )
+                    sen66_widget.layout.legend = dict(orientation="h", y=-0.2)
+                    sen66_widget.layout.margin = dict(l=20, r=60, t=20, b=20)
 
-        if chart == "co2":
-            df = pd.DataFrame(
-                {"Time": times, "CO₂ (ppm)": [d["co2_ppm"] for d in data_rows]}
-            )
-            return _fig(
-                px.line(df, x="Time", y="CO₂ (ppm)", markers=True, template=tpl)
-            )
+                elif chart == "co2":
+                    sen66_widget.add_scatter(
+                        x=times,
+                        y=[d["co2_ppm"] for d in data_rows],
+                        name="CO₂ (ppm)",
+                        mode="lines+markers",
+                    )
+                    sen66_widget.layout.yaxis = dict(title="CO₂ (ppm)")
+                    sen66_widget.layout.yaxis2 = {}
+                    sen66_widget.layout.legend = {}
+                    sen66_widget.layout.margin = dict(l=20, r=20, t=20, b=20)
 
-        if chart == "voc_nox":
-            df = pd.DataFrame(
-                {
-                    "Time": times,
-                    "VOC Index": [d["voc_index"] for d in data_rows],
-                    "NOx Index": [d["nox_index"] for d in data_rows],
-                }
-            )
-            return _fig(
-                px.line(
-                    df,
-                    x="Time",
-                    y=["VOC Index", "NOx Index"],
-                    markers=True,
-                    template=tpl,
-                )
-            )
+                elif chart == "voc_nox":
+                    sen66_widget.add_scatter(
+                        x=times,
+                        y=[d["voc_index"] for d in data_rows],
+                        name="VOC Index",
+                        mode="lines+markers",
+                    )
+                    sen66_widget.add_scatter(
+                        x=times,
+                        y=[d["nox_index"] for d in data_rows],
+                        name="NOx Index",
+                        mode="lines+markers",
+                    )
+                    sen66_widget.layout.yaxis = dict(title="Index")
+                    sen66_widget.layout.yaxis2 = {}
+                    sen66_widget.layout.legend = {}
+                    sen66_widget.layout.margin = dict(l=20, r=20, t=20, b=20)
 
-        if chart == "pm_mass":
-            df = pd.DataFrame(
-                {
-                    "Time": times,
-                    "PM1.0": [d["pm1_0_ugm3"] for d in data_rows],
-                    "PM2.5": [d["pm2_5_ugm3"] for d in data_rows],
-                    "PM4.0": [d["pm4_0_ugm3"] for d in data_rows],
-                    "PM10": [d["pm10_0_ugm3"] for d in data_rows],
-                }
-            )
-            return _fig(
-                px.line(
-                    df,
-                    x="Time",
-                    y=["PM1.0", "PM2.5", "PM4.0", "PM10"],
-                    markers=True,
-                    template=tpl,
-                    labels={"value": "µg/m³", "variable": "Fraction"},
-                )
-            )
+                elif chart == "pm_mass":
+                    for key, name in [
+                        ("pm1_0_ugm3", "PM1.0"),
+                        ("pm2_5_ugm3", "PM2.5"),
+                        ("pm4_0_ugm3", "PM4.0"),
+                        ("pm10_0_ugm3", "PM10"),
+                    ]:
+                        sen66_widget.add_scatter(
+                            x=times,
+                            y=[d[key] for d in data_rows],
+                            name=name,
+                            mode="lines+markers",
+                        )
+                    sen66_widget.layout.yaxis = dict(title="µg/m³")
+                    sen66_widget.layout.yaxis2 = {}
+                    sen66_widget.layout.legend = {}
+                    sen66_widget.layout.margin = dict(l=20, r=20, t=20, b=20)
 
-        if chart == "pm_nc":
-            df = pd.DataFrame(
-                {
-                    "Time": times,
-                    "NC PM0.5": [d["nc_pm0_5_pcm3"] for d in data_rows],
-                    "NC PM1.0": [d["nc_pm1_0_pcm3"] for d in data_rows],
-                    "NC PM2.5": [d["nc_pm2_5_pcm3"] for d in data_rows],
-                    "NC PM4.0": [d["nc_pm4_0_pcm3"] for d in data_rows],
-                    "NC PM10": [d["nc_pm10_0_pcm3"] for d in data_rows],
-                }
-            )
-            return _fig(
-                px.line(
-                    df,
-                    x="Time",
-                    y=["NC PM0.5", "NC PM1.0", "NC PM2.5", "NC PM4.0", "NC PM10"],
-                    markers=True,
-                    template=tpl,
-                    labels={"value": "#/cm³", "variable": "Fraction"},
-                )
-            )
+                elif chart == "pm_nc":
+                    for key, name in [
+                        ("nc_pm0_5_pcm3", "NC PM0.5"),
+                        ("nc_pm1_0_pcm3", "NC PM1.0"),
+                        ("nc_pm2_5_pcm3", "NC PM2.5"),
+                        ("nc_pm4_0_pcm3", "NC PM4.0"),
+                        ("nc_pm10_0_pcm3", "NC PM10"),
+                    ]:
+                        sen66_widget.add_scatter(
+                            x=times,
+                            y=[d[key] for d in data_rows],
+                            name=name,
+                            mode="lines+markers",
+                        )
+                    sen66_widget.layout.yaxis = dict(title="#/cm³")
+                    sen66_widget.layout.yaxis2 = {}
+                    sen66_widget.layout.legend = {}
+                    sen66_widget.layout.margin = dict(l=20, r=20, t=20, b=20)
 
-        return ui.p("Unknown chart selection.")
+            else:
+                # Surgical data update — no DOM teardown, no flash
+                if chart == "temp_hum":
+                    sen66_widget.data[0].x = times
+                    sen66_widget.data[0].y = [d["temperature_c"] for d in data_rows]
+                    sen66_widget.data[1].x = times
+                    sen66_widget.data[1].y = [d["humidity_rh"] for d in data_rows]
+
+                elif chart == "co2":
+                    sen66_widget.data[0].x = times
+                    sen66_widget.data[0].y = [d["co2_ppm"] for d in data_rows]
+
+                elif chart == "voc_nox":
+                    sen66_widget.data[0].x = times
+                    sen66_widget.data[0].y = [d["voc_index"] for d in data_rows]
+                    sen66_widget.data[1].x = times
+                    sen66_widget.data[1].y = [d["nox_index"] for d in data_rows]
+
+                elif chart == "pm_mass":
+                    for i, key in enumerate(
+                        ["pm1_0_ugm3", "pm2_5_ugm3", "pm4_0_ugm3", "pm10_0_ugm3"]
+                    ):
+                        sen66_widget.data[i].x = times
+                        sen66_widget.data[i].y = [d[key] for d in data_rows]
+
+                elif chart == "pm_nc":
+                    for i, key in enumerate(
+                        [
+                            "nc_pm0_5_pcm3",
+                            "nc_pm1_0_pcm3",
+                            "nc_pm2_5_pcm3",
+                            "nc_pm4_0_pcm3",
+                            "nc_pm10_0_pcm3",
+                        ]
+                    ):
+                        sen66_widget.data[i].x = times
+                        sen66_widget.data[i].y = [d[key] for d in data_rows]

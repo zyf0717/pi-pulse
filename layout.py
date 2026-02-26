@@ -1,6 +1,7 @@
 import shinyswatch
 from faicons import icon_svg
 from shiny import ui
+from shinywidgets import output_widget
 
 from config import ALL_DEVICES, ALL_DEVICES_DEFAULT, PULSE_CHARTS, SEN66_CHARTS
 
@@ -80,7 +81,7 @@ app_ui = ui.page_sidebar(
                 PULSE_CHARTS,
                 selected="temp",
             ),
-            ui.output_ui("temp_graph"),
+            output_widget("temp_graph"),
         ),
         # ── Environmental tab ────────────────────────────────────────────────
         ui.nav_panel(
@@ -179,7 +180,7 @@ app_ui = ui.page_sidebar(
                 SEN66_CHARTS,
                 selected="temp_hum",
             ),
-            ui.output_ui("sen66_graph"),
+            output_widget("sen66_graph"),
         ),
         selected="SEN66",
     ),
