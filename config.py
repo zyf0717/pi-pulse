@@ -32,8 +32,10 @@ ALL_DEVICES_DEFAULT = "11"
 
 PULSE_CHARTS = {
     "cpu": "CPU Usage (%)",
+    "cpu_freq": "CPU Frequency (MHz)",
     "mem": "Memory Usage (%)",
     "temp": "Temperature (°C)",
+    "net": "Network Receive & Transmit (KB/s)",
 }
 
 SEN66_CHARTS = {

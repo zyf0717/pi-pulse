@@ -63,6 +63,11 @@ app_ui = ui.page_sidebar(
                     showcase=ui.tags.i(class_="bi bi-cpu"),
                 ),
                 ui.value_box(
+                    "CPU Frequency",
+                    ui.output_text("cpu_freq_val"),
+                    showcase=ui.tags.i(class_="bi bi-speedometer2"),
+                ),
+                ui.value_box(
                     "Memory Usage",
                     ui.output_text("mem_val"),
                     showcase=ui.tags.i(class_="bi bi-memory"),
@@ -71,6 +76,16 @@ app_ui = ui.page_sidebar(
                     "Temperature",
                     ui.output_text("temp_val"),
                     showcase=ui.tags.i(class_="bi bi-thermometer-half"),
+                ),
+                ui.value_box(
+                    "Network Receive",
+                    ui.output_text("net_rx_val"),
+                    showcase=ui.tags.i(class_="bi bi-arrow-down-circle"),
+                ),
+                ui.value_box(
+                    "Network Transmit",
+                    ui.output_text("net_tx_val"),
+                    showcase=ui.tags.i(class_="bi bi-arrow-up-circle"),
                 ),
                 fill=False,
             ),

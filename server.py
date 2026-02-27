@@ -22,7 +22,14 @@ def server(input, output, session):
         return input.chart_style()
 
     # ── Pi-pulse state ────────────────────────────────────────────────────────
-    _pulse_default = {"cpu": 0.0, "mem": 0.0, "temp": 0.0}
+    _pulse_default = {
+        "cpu": 0.0,
+        "mem": 0.0,
+        "temp": 0.0,
+        "cpu_freq_avg_mhz": 0.0,
+        "net_rx_bps_total": 0,
+        "net_tx_bps_total": 0,
+    }
     pulse_latest: dict[str, reactive.Value] = {
         k: reactive.Value(dict(_pulse_default)) for k in DEVICES
     }
@@ -156,6 +163,27 @@ def server(input, output, session):
             return "N/A"
         return f"{pulse_latest[dev]().get('temp', 0.0):.1f}°C"
 
+    @render.text
+    def cpu_freq_val():
+        dev = input.device()
+        if dev not in DEVICES:
+            return "N/A"
+        return f"{pulse_latest[dev]().get('cpu_freq_avg_mhz', 0.0):.0f} MHz"
+
+    @render.text
+    def net_rx_val():
+        dev = input.device()
+        if dev not in DEVICES:
+            return "N/A"
+        return f"{pulse_latest[dev]().get('net_rx_bps_total', 0) / 1024:.1f} KB/s"
+
+    @render.text
+    def net_tx_val():
+        dev = input.device()
+        if dev not in DEVICES:
+            return "N/A"
+        return f"{pulse_latest[dev]().get('net_tx_bps_total', 0) / 1024:.1f} KB/s"
+
     # ── Pulse chart — persistent widget, surgical data updates ─────────────
     pulse_widget = go.FigureWidget()
     _pulse_state: dict = {"chart": None, "dev": None, "tpl": None}
@@ -181,8 +209,6 @@ def server(input, output, session):
         times = [t for t, _ in history]
         data_rows = [d for _, d in history]
         label = PULSE_CHARTS[chart]
-        field = {"cpu": "cpu", "mem": "mem", "temp": "temp"}[chart]
-        y_data = [d.get(field, 0.0) for d in data_rows]
 
         rebuild = (
             _pulse_state["chart"] != chart
@@ -190,18 +216,49 @@ def server(input, output, session):
             or _pulse_state["tpl"] != tpl
         )
         with pulse_widget.batch_update():
-            if rebuild:
-                pulse_widget.data = []
-                pulse_widget.add_scatter(
-                    x=times, y=y_data, mode="lines+markers", name=label
-                )
-                pulse_widget.layout.template = tpl
-                pulse_widget.layout.margin = dict(l=20, r=20, t=20, b=20)
-                pulse_widget.layout.yaxis.title = label
-                _pulse_state.update({"chart": chart, "dev": dev, "tpl": tpl})
+            if chart == "net":
+                rx_data = [d.get("net_rx_bps_total", 0) / 1024 for d in data_rows]
+                tx_data = [d.get("net_tx_bps_total", 0) / 1024 for d in data_rows]
+                if rebuild:
+                    pulse_widget.data = []
+                    pulse_widget.add_scatter(
+                        x=times, y=rx_data, mode="lines+markers", name="Receive (KB/s)"
+                    )
+                    pulse_widget.add_scatter(
+                        x=times, y=tx_data, mode="lines+markers", name="Transmit (KB/s)"
+                    )
+                    pulse_widget.layout.template = tpl
+                    pulse_widget.layout.margin = dict(l=20, r=20, t=20, b=20)
+                    pulse_widget.layout.yaxis.title = "KB/s"
+                    pulse_widget.layout.legend = dict(orientation="h", y=-0.2)
+                    _pulse_state.update({"chart": chart, "dev": dev, "tpl": tpl})
+                else:
+                    pulse_widget.data[0].x = times
+                    pulse_widget.data[0].y = rx_data
+                    pulse_widget.data[1].x = times
+                    pulse_widget.data[1].y = tx_data
             else:
-                pulse_widget.data[0].x = times
-                pulse_widget.data[0].y = y_data
+                field = {
+                    "cpu": "cpu",
+                    "mem": "mem",
+                    "temp": "temp",
+                    "cpu_freq": "cpu_freq_avg_mhz",
+                }[chart]
+                scale = 1
+                y_data = [d.get(field, 0.0) * scale for d in data_rows]
+                if rebuild:
+                    pulse_widget.data = []
+                    pulse_widget.add_scatter(
+                        x=times, y=y_data, mode="lines+markers", name=label
+                    )
+                    pulse_widget.layout.template = tpl
+                    pulse_widget.layout.margin = dict(l=20, r=20, t=20, b=20)
+                    pulse_widget.layout.yaxis.title = label
+                    pulse_widget.layout.legend = {}
+                    _pulse_state.update({"chart": chart, "dev": dev, "tpl": tpl})
+                else:
+                    pulse_widget.data[0].x = times
+                    pulse_widget.data[0].y = y_data
 
     # ── Sen66 value box renders ───────────────────────────────────────────────
     @render.text
