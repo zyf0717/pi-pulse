@@ -35,7 +35,7 @@ PULSE_CHARTS = {
     "cpu_freq": "CPU Frequency (MHz)",
     "mem": "Memory Usage (%)",
     "temp": "Temperature (°C)",
-    "net": "Network Receive & Transmit (KB/s)",
+    "net": "Download & Upload (KB/s)",
 }
 
 SEN66_CHARTS = {

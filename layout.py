@@ -60,26 +60,32 @@ app_ui = ui.page_sidebar(
                 ui.card(
                     ui.card_header("CPU Usage"),
                     ui.div(ui.output_text("cpu_val"), class_="fs-3 fw-bold p-2"),
+                    ui.output_ui("cpu_spark"),
                 ),
                 ui.card(
                     ui.card_header("CPU Frequency"),
                     ui.div(ui.output_text("cpu_freq_val"), class_="fs-3 fw-bold p-2"),
+                    ui.output_ui("cpu_freq_spark"),
                 ),
                 ui.card(
                     ui.card_header("Memory Usage"),
                     ui.div(ui.output_text("mem_val"), class_="fs-3 fw-bold p-2"),
+                    ui.output_ui("mem_spark"),
                 ),
                 ui.card(
                     ui.card_header("Temperature"),
                     ui.div(ui.output_text("temp_val"), class_="fs-3 fw-bold p-2"),
+                    ui.output_ui("temp_spark"),
                 ),
                 ui.card(
-                    ui.card_header("Network Receive"),
+                    ui.card_header("Download"),
                     ui.div(ui.output_text("net_rx_val"), class_="fs-3 fw-bold p-2"),
+                    ui.output_ui("net_rx_spark"),
                 ),
                 ui.card(
-                    ui.card_header("Network Transmit"),
+                    ui.card_header("Upload"),
                     ui.div(ui.output_text("net_tx_val"), class_="fs-3 fw-bold p-2"),
+                    ui.output_ui("net_tx_spark"),
                 ),
                 fill=False,
             ),
@@ -113,6 +119,7 @@ app_ui = ui.page_sidebar(
                         ),
                     ),
                     ui.div(ui.output_text("sen66_temp_val"), class_="fs-3 fw-bold p-2"),
+                    ui.output_ui("sen66_temp_spark"),
                 ),
                 ui.card(
                     ui.card_header(
@@ -128,6 +135,7 @@ app_ui = ui.page_sidebar(
                         ),
                     ),
                     ui.div(ui.output_text("sen66_hum_val"), class_="fs-3 fw-bold p-2"),
+                    ui.output_ui("sen66_hum_spark"),
                 ),
                 ui.card(
                     ui.card_header(
@@ -145,6 +153,7 @@ app_ui = ui.page_sidebar(
                         ),
                     ),
                     ui.div(ui.output_text("sen66_co2_val"), class_="fs-3 fw-bold p-2"),
+                    ui.output_ui("sen66_co2_spark"),
                 ),
                 ui.card(
                     ui.card_header(
@@ -162,6 +171,7 @@ app_ui = ui.page_sidebar(
                         ),
                     ),
                     ui.div(ui.output_text("sen66_voc_val"), class_="fs-3 fw-bold p-2"),
+                    ui.output_ui("sen66_voc_spark"),
                 ),
                 ui.card(
                     ui.card_header(
@@ -179,6 +189,7 @@ app_ui = ui.page_sidebar(
                         ),
                     ),
                     ui.div(ui.output_text("sen66_nox_val"), class_="fs-3 fw-bold p-2"),
+                    ui.output_ui("sen66_nox_spark"),
                 ),
                 fill=False,
             ),
