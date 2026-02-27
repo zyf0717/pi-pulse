@@ -33,17 +33,16 @@ app_ui = ui.page_sidebar(
     ui.sidebar(
         ui.input_select(
             "device",
-            None,
+            "Select a device:",
             ALL_DEVICES,
             selected=ALL_DEVICES_DEFAULT,
         ),
         ui.hr(),
         shinyswatch.theme_picker_ui(),
         ui.hr(),
-        ui.h6("Chart style"),
         ui.input_radio_buttons(
             "chart_style",
-            None,
+            "Chart style:",
             {"plotly": "Light", "plotly_dark": "Dark"},
             selected="plotly_dark",
             inline=True,

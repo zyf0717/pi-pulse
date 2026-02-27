@@ -8,14 +8,14 @@ with _CONFIG_PATH.open() as _f:
 
 # pi-pulse: device-keyed dict from config
 DEVICES = {
-    k: {"label": f"Device {k} (192.168.121.{k})", "url": v["stream"]}
+    k: {"label": f"{k} (192.168.121.{k})", "url": v["stream"]}
     for k, v in _CONFIG["pi-pulse"].items()
 }
 
 # sen66: device-keyed dict; each entry has two endpoints
 SEN66_DEVICES = {
     k: {
-        "label": f"Device {k} (192.168.121.{k})",
+        "label": f"{k} (192.168.121.{k})",
         "stream": v["stream"],
         "nc_stream": v["nc-stream"],
     }
@@ -25,8 +25,7 @@ SEN66_DEFAULT_DEV = next(iter(SEN66_DEVICES))
 
 # Combined device list across all tabs (sorted by key)
 ALL_DEVICES = {
-    k: f"Device {k} (192.168.121.{k})"
-    for k in sorted(set(DEVICES) | set(SEN66_DEVICES))
+    k: f"{k} (192.168.121.{k})" for k in sorted(set(DEVICES) | set(SEN66_DEVICES))
 }
 ALL_DEVICES_DEFAULT = "11"
 

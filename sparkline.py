@@ -49,15 +49,19 @@ def sparkline(
         f'stroke-linejoin="round" stroke-linecap="round"/>'
         f"</svg>"
     )
+    flat = hi == lo
+    justify = "flex-end" if flat else "space-between"
+    stats_inner = (
+        f"<div>{fmt(lo)}</div>" if flat else f"<div>{fmt(hi)}</div><div>{fmt(lo)}</div>"
+    )
     stats = (
         f'<div style="'
-        f"display:flex;flex-direction:column;justify-content:space-between;"
+        f"display:flex;flex-direction:column;justify-content:{justify};"
         f"height:{height}px;"
         f"font-size:0.7rem;line-height:1;text-align:right;"
         f"color:{_LABEL_COLOR};white-space:nowrap;flex-shrink:0;"
         f'font-variant-numeric:tabular-nums">'
-        f"<div>{fmt(hi)}</div>"
-        f"<div>{fmt(lo)}</div>"
+        f"{stats_inner}"
         f"</div>"
     )
     wrapper = (
