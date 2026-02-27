@@ -45,7 +45,6 @@ A real-time monitoring dashboard for Raspberry Pi systems and environmental sens
 - httpx (for async HTTP streaming)
 - PyYAML (for configuration)
 - pandas
-- python-dotenv
 - shinyswatch (theme support)
 - faicons (icon support)
 - shinywidgets
@@ -196,7 +195,7 @@ The dashboard includes a Web Worker-based keepalive mechanism to prevent browser
 2. **Tabs**: Switch between System (Pi-Pulse) and SEN66 data
 3. **Value Boxes**: Real-time metrics with sparkline trends showing the last 60 data points
 4. **Chart Selector**: Choose which metric to visualize in detail
-5. **Interactive Charts**: 
+5. **Interactive Charts**:
    - Zoom, pan, and hover for detailed insights
    - Auto-refresh with new data (incremental updates, no flash)
    - Single-series: CPU, Memory, Temperature, CPU Frequency, CO₂

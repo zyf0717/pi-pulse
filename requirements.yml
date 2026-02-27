@@ -6,7 +6,6 @@ dependencies:
   - python=3.12
   - shiny
   - plotly
-  - python-dotenv
   - httpx
   - pandas
   - pyyaml
