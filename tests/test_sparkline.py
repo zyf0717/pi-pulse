@@ -1,12 +1,30 @@
-import sparkline as sparkline_module
+from pathlib import Path
+from types import ModuleType
+import importlib.util
+import sys
 
 
-def _passthrough_html(monkeypatch) -> None:
-    monkeypatch.setattr(sparkline_module.ui, "HTML", lambda value: value)
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _load_sparkline_module(monkeypatch):
+    fake_shiny = ModuleType("shiny")
+    fake_shiny.ui = ModuleType("shiny.ui")
+    fake_shiny.ui.HTML = lambda value: value
+
+    monkeypatch.setitem(sys.modules, "shiny", fake_shiny)
+
+    module_name = "sparkline_under_test"
+    sys.modules.pop(module_name, None)
+    spec = importlib.util.spec_from_file_location(module_name, ROOT / "sparkline.py")
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_sparkline_returns_empty_string_for_short_series(monkeypatch) -> None:
-    _passthrough_html(monkeypatch)
+    sparkline_module = _load_sparkline_module(monkeypatch)
 
     html = sparkline_module.sparkline([1.0])
 
@@ -14,7 +32,7 @@ def test_sparkline_returns_empty_string_for_short_series(monkeypatch) -> None:
 
 
 def test_sparkline_renders_single_stat_for_flat_series(monkeypatch) -> None:
-    _passthrough_html(monkeypatch)
+    sparkline_module = _load_sparkline_module(monkeypatch)
 
     html = sparkline_module.sparkline([2.0, 2.0], fmt=lambda value: f"{value:.0f}x")
 
@@ -23,7 +41,7 @@ def test_sparkline_renders_single_stat_for_flat_series(monkeypatch) -> None:
 
 
 def test_sparkline_renders_min_max_with_custom_formatter(monkeypatch) -> None:
-    _passthrough_html(monkeypatch)
+    sparkline_module = _load_sparkline_module(monkeypatch)
 
     html = sparkline_module.sparkline(
         [1.0, 3.5, 2.0],

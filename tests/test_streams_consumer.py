@@ -1,6 +1,11 @@
 import asyncio
+from pathlib import Path
+from types import ModuleType
+import importlib.util
+import sys
 
-import streams.consumer as consumer_module
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class _AsyncNullContext:
@@ -50,7 +55,48 @@ def _fake_async_client(plans):
     return _FakeAsyncClient
 
 
+def _load_consumer_module(monkeypatch):
+    fake_httpx = ModuleType("httpx")
+
+    class _PlaceholderAsyncClient:
+        def __init__(self, timeout=None):
+            self.timeout = timeout
+
+    fake_httpx.AsyncClient = _PlaceholderAsyncClient
+
+    fake_shiny = ModuleType("shiny")
+
+    class _Reactive:
+        @staticmethod
+        def lock():
+            return _AsyncNullContext()
+
+        @staticmethod
+        async def flush() -> None:
+            return None
+
+    fake_shiny.reactive = _Reactive()
+
+    fake_streams = ModuleType("streams")
+    fake_streams.__path__ = []
+
+    monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
+    monkeypatch.setitem(sys.modules, "shiny", fake_shiny)
+    monkeypatch.setitem(sys.modules, "streams", fake_streams)
+
+    module_name = "streams.consumer_under_test"
+    sys.modules.pop(module_name, None)
+    spec = importlib.util.spec_from_file_location(
+        module_name, ROOT / "streams" / "consumer.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_stream_consumer_processes_only_legacy_data_lines(monkeypatch) -> None:
+    consumer_module = _load_consumer_module(monkeypatch)
     plans = [
         {
             "lines": [
@@ -82,6 +128,7 @@ def test_stream_consumer_processes_only_legacy_data_lines(monkeypatch) -> None:
 
 
 def test_stream_consumer_skips_malformed_json(monkeypatch) -> None:
+    consumer_module = _load_consumer_module(monkeypatch)
     plans = [
         {"lines": ['data: {"cpu": ']},
         {"enter_exc": asyncio.CancelledError()},
@@ -107,6 +154,7 @@ def test_stream_consumer_skips_malformed_json(monkeypatch) -> None:
 
 
 def test_stream_consumer_retries_with_backoff_after_errors(monkeypatch) -> None:
+    consumer_module = _load_consumer_module(monkeypatch)
     plans = [
         {"enter_exc": RuntimeError("boom")},
         {"enter_exc": asyncio.CancelledError()},
