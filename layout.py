@@ -57,35 +57,29 @@ app_ui = ui.page_sidebar(
             "System",
             ui.br(),
             ui.layout_column_wrap(
-                ui.value_box(
-                    "CPU Usage",
-                    ui.output_text("cpu_val"),
-                    showcase=ui.tags.i(class_="bi bi-cpu"),
+                ui.card(
+                    ui.card_header("CPU Usage"),
+                    ui.div(ui.output_text("cpu_val"), class_="fs-3 fw-bold p-2"),
                 ),
-                ui.value_box(
-                    "CPU Frequency",
-                    ui.output_text("cpu_freq_val"),
-                    showcase=ui.tags.i(class_="bi bi-speedometer2"),
+                ui.card(
+                    ui.card_header("CPU Frequency"),
+                    ui.div(ui.output_text("cpu_freq_val"), class_="fs-3 fw-bold p-2"),
                 ),
-                ui.value_box(
-                    "Memory Usage",
-                    ui.output_text("mem_val"),
-                    showcase=ui.tags.i(class_="bi bi-memory"),
+                ui.card(
+                    ui.card_header("Memory Usage"),
+                    ui.div(ui.output_text("mem_val"), class_="fs-3 fw-bold p-2"),
                 ),
-                ui.value_box(
-                    "Temperature",
-                    ui.output_text("temp_val"),
-                    showcase=ui.tags.i(class_="bi bi-thermometer-half"),
+                ui.card(
+                    ui.card_header("Temperature"),
+                    ui.div(ui.output_text("temp_val"), class_="fs-3 fw-bold p-2"),
                 ),
-                ui.value_box(
-                    "Network Receive",
-                    ui.output_text("net_rx_val"),
-                    showcase=ui.tags.i(class_="bi bi-arrow-down-circle"),
+                ui.card(
+                    ui.card_header("Network Receive"),
+                    ui.div(ui.output_text("net_rx_val"), class_="fs-3 fw-bold p-2"),
                 ),
-                ui.value_box(
-                    "Network Transmit",
-                    ui.output_text("net_tx_val"),
-                    showcase=ui.tags.i(class_="bi bi-arrow-up-circle"),
+                ui.card(
+                    ui.card_header("Network Transmit"),
+                    ui.div(ui.output_text("net_tx_val"), class_="fs-3 fw-bold p-2"),
                 ),
                 fill=False,
             ),
