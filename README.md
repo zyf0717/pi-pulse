@@ -98,31 +98,11 @@ Each device is keyed by its last octet of the IP address. The dashboard will lab
 
 ## Running
 
-### Development
-
 ```bash
 python pi_pulse.py
 ```
 
 The application will start on `http://127.0.0.1:8009` with WebSocket ping/pong configured for long-running connections.
-
-### Production / Scheduled Restart
-
-Use the provided [cron.sh](cron.sh) script to manage the application:
-
-```bash
-./cron.sh
-```
-
-This script:
-- Activates the conda environment
-- Kills any existing instances
-- Restarts the application in the background with `nohup`
-
-Add to crontab for periodic restarts (e.g., every hour):
-```bash
-0 * * * * /home/yifei/repos/pi-pulse/cron.sh
-```
 
 ## Data Stream Format
 
@@ -238,8 +218,3 @@ The SEN66 tab includes tooltips for each sensor with detailed specifications:
 - **Incremental updates**: Charts use batch updates to avoid DOM teardown and flashing
 - **Per-device state**: Reactive values and history tracked independently for each device
 - **Session lifecycle**: SSE streams are task-based and auto-cancelled on session end
-
-## License
-
-[Add license information here]
-## Architecture
