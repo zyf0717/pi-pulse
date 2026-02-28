@@ -1,33 +1,54 @@
+from collections.abc import Mapping
 from pathlib import Path
 
 import yaml
 
 _CONFIG_PATH = Path(__file__).parent / "config.yaml"
-with _CONFIG_PATH.open() as _f:
-    _CONFIG = yaml.safe_load(_f)
+_IP_PREFIX = "192.168.121."
 
-# pi-pulse: device-keyed dict from config
-DEVICES = {
-    k: {"label": f"{k} (192.168.121.{k})", "url": v["stream"]}
-    for k, v in _CONFIG["pi-pulse"].items()
-}
 
-# sen66: device-keyed dict; each entry has two endpoints
-SEN66_DEVICES = {
-    k: {
-        "label": f"{k} (192.168.121.{k})",
-        "stream": v["stream"],
-        "nc_stream": v["nc-stream"],
+def load_raw_config(config_path: Path = _CONFIG_PATH) -> dict:
+    with config_path.open() as config_file:
+        return yaml.safe_load(config_file) or {}
+
+
+def _device_label(key: str) -> str:
+    return f"{key} ({_IP_PREFIX}{key})"
+
+
+def build_settings(raw_config: Mapping[str, Mapping[str, Mapping[str, str]]]) -> dict:
+    pulse_devices = {
+        key: {"label": _device_label(key), "url": value["stream"]}
+        for key, value in raw_config["pi-pulse"].items()
     }
-    for k, v in _CONFIG["sen66"].items()
-}
-SEN66_DEFAULT_DEV = next(iter(SEN66_DEVICES))
+    sen66_devices = {
+        key: {
+            "label": _device_label(key),
+            "stream": value["stream"],
+            "nc_stream": value["nc-stream"],
+        }
+        for key, value in raw_config["sen66"].items()
+    }
+    all_devices = {
+        key: _device_label(key)
+        for key in sorted(set(pulse_devices) | set(sen66_devices))
+    }
+    return {
+        "devices": pulse_devices,
+        "sen66_devices": sen66_devices,
+        "sen66_default_dev": next(iter(sen66_devices)),
+        "all_devices": all_devices,
+        "all_devices_default": "11",
+    }
 
-# Combined device list across all tabs (sorted by key)
-ALL_DEVICES = {
-    k: f"{k} (192.168.121.{k})" for k in sorted(set(DEVICES) | set(SEN66_DEVICES))
-}
-ALL_DEVICES_DEFAULT = "11"
+
+_SETTINGS = build_settings(load_raw_config())
+
+DEVICES = _SETTINGS["devices"]
+SEN66_DEVICES = _SETTINGS["sen66_devices"]
+SEN66_DEFAULT_DEV = _SETTINGS["sen66_default_dev"]
+ALL_DEVICES = _SETTINGS["all_devices"]
+ALL_DEVICES_DEFAULT = _SETTINGS["all_devices_default"]
 
 PULSE_CHARTS = {
     "cpu": "CPU Usage (%)",

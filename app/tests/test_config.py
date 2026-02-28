@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from app import config
 
 
@@ -36,3 +38,44 @@ def test_all_devices_and_defaults_match_current_config() -> None:
 def test_chart_option_mappings_are_stable() -> None:
     assert config.PULSE_CHARTS["net"] == "Download & Upload (KB/s)"
     assert config.SEN66_CHARTS["pm_nc"] == "PM Number Concentration (#/cm³)"
+
+
+def test_load_raw_config_reads_explicit_path(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        'pi-pulse:\n  "12":\n    stream: http://example/pulse\nsen66:\n  "12":\n    stream: http://example/sen66\n    nc-stream: http://example/sen66/nc\n',
+        encoding="utf-8",
+    )
+
+    loaded = config.load_raw_config(config_path)
+
+    assert loaded["pi-pulse"]["12"]["stream"] == "http://example/pulse"
+    assert loaded["sen66"]["12"]["nc-stream"] == "http://example/sen66/nc"
+
+
+def test_build_settings_shapes_device_maps_and_preserves_current_default_behavior() -> None:
+    settings = config.build_settings(
+        {
+            "pi-pulse": {"12": {"stream": "http://example/pulse"}},
+            "sen66": {
+                "12": {
+                    "stream": "http://example/sen66",
+                    "nc-stream": "http://example/sen66/nc",
+                }
+            },
+        }
+    )
+
+    assert settings["devices"] == {
+        "12": {"label": "12 (192.168.121.12)", "url": "http://example/pulse"}
+    }
+    assert settings["sen66_devices"] == {
+        "12": {
+            "label": "12 (192.168.121.12)",
+            "stream": "http://example/sen66",
+            "nc_stream": "http://example/sen66/nc",
+        }
+    }
+    assert settings["sen66_default_dev"] == "12"
+    assert settings["all_devices"] == {"12": "12 (192.168.121.12)"}
+    assert settings["all_devices_default"] == "11"
