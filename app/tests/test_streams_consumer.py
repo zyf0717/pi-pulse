@@ -79,13 +79,28 @@ def _load_consumer_module(monkeypatch):
 
     fake_app = ModuleType("app")
     fake_app.__path__ = []
-    fake_streams = ModuleType("streams")
+    fake_streams = ModuleType("app.streams")
     fake_streams.__path__ = []
+    fake_parser = ModuleType("app.streams.parser")
+
+    def extract_sse_payload(line: str):
+        if not line.startswith("data: "):
+            return None
+        return line[len("data: ") :]
+
+    def parse_payload(payload: str):
+        import json
+
+        return json.loads(payload)
+
+    fake_parser.extract_sse_payload = extract_sse_payload
+    fake_parser.parse_payload = parse_payload
 
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
     monkeypatch.setitem(sys.modules, "shiny", fake_shiny)
     monkeypatch.setitem(sys.modules, "app", fake_app)
     monkeypatch.setitem(sys.modules, "app.streams", fake_streams)
+    monkeypatch.setitem(sys.modules, "app.streams.parser", fake_parser)
 
     module_name = "app.streams.consumer_under_test"
     sys.modules.pop(module_name, None)

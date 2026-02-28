@@ -7,6 +7,28 @@ import logging
 import httpx
 from shiny import reactive
 
+from app.streams.parser import extract_sse_payload, parse_payload
+
+
+async def _handle_packet(label: str, line: str, on_data) -> None:
+    payload = extract_sse_payload(line)
+    if payload is None:
+        return
+
+    try:
+        data = parse_payload(payload)
+    except json.JSONDecodeError:
+        logging.warning(
+            "Malformed SSE packet [%s], skipping: %r",
+            label,
+            payload,
+        )
+        return
+
+    async with reactive.lock():
+        await on_data(data)
+        await reactive.flush()
+
 
 async def stream_consumer(label: str, url: str, on_data):
     """Consume an SSE endpoint; call on_data(parsed_dict) under reactive.lock."""
@@ -18,20 +40,7 @@ async def stream_consumer(label: str, url: str, on_data):
                     response.raise_for_status()
                     backoff = 1
                     async for line in response.aiter_lines():
-                        if line.startswith("data: "):
-                            json_str = line[len("data: ") :]
-                            try:
-                                data = json.loads(json_str)
-                            except json.JSONDecodeError:
-                                logging.warning(
-                                    "Malformed SSE packet [%s], skipping: %r",
-                                    label,
-                                    json_str,
-                                )
-                                continue
-                            async with reactive.lock():
-                                await on_data(data)
-                                await reactive.flush()
+                        await _handle_packet(label, line, on_data)
         except asyncio.CancelledError:
             return
         except Exception as exc:
