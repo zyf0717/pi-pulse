@@ -1,7 +1,7 @@
 from shiny import App, run_app
 
-from layout import app_ui
-from server import server
+from app.layout import app_ui
+from app.server import server
 
 app = App(app_ui, server)
 

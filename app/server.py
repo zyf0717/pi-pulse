@@ -6,10 +6,10 @@ import plotly.graph_objects as go
 import shinyswatch
 from shiny import reactive
 
-from config import DEVICES, SEN66_DEVICES
-from renders.pulse import register_pulse_renders
-from renders.sen66 import register_sen66_renders
-from streams.consumer import stream_consumer
+from app.config import DEVICES, SEN66_DEVICES
+from app.renders.pulse import register_pulse_renders
+from app.renders.sen66 import register_sen66_renders
+from app.streams.consumer import stream_consumer
 
 
 def server(input, output, session):

@@ -1,4 +1,4 @@
-import config
+from app import config
 
 
 def test_devices_match_checked_in_config() -> None:

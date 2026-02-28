@@ -23,18 +23,21 @@ A real-time monitoring dashboard for Raspberry Pi systems and environmental sens
 ## Architecture
 
 ```
-├── pi_pulse.py          # Main application entry point
-├── layout.py            # UI layout and components
-├── server.py            # Server logic and reactive state
-├── config.py            # Configuration loader
-├── config.yaml          # Device stream endpoints
-├── sparkline.py         # SVG sparkline rendering utility
 ├── cron.sh              # Production restart script
-├── renders/
-│   ├── pulse.py         # Pi-pulse metrics renders
-│   └── sen66.py         # SEN66 sensor data renders
-└── streams/
-    └── consumer.py      # SSE stream consumer with backoff
+└── app/
+    ├── pi_pulse.py      # Main application entry point
+    ├── layout.py        # UI layout and components
+    ├── server.py        # Server logic and reactive state
+    ├── config.py        # Configuration loader
+    ├── config.yaml      # Device stream endpoints
+    ├── sparkline.py     # SVG sparkline rendering utility
+    ├── renders/
+    │   ├── pulse.py     # Pi-pulse metrics renders
+    │   └── sen66.py     # SEN66 sensor data renders
+    ├── streams/
+    │   └── consumer.py  # SSE stream consumer with backoff
+    └── tests/
+        └── ...          # App test suite
 ```
 
 ## Requirements
@@ -71,7 +74,7 @@ A real-time monitoring dashboard for Raspberry Pi systems and environmental sens
 
 ## Configuration
 
-Configure your devices in [config.yaml](config.yaml):
+Configure your devices in [app/config.yaml](app/config.yaml):
 
 ```yaml
 pi-pulse:
@@ -98,7 +101,7 @@ Each device is keyed by its last octet of the IP address. The dashboard will lab
 ## Running
 
 ```bash
-python pi_pulse.py
+python -m app.pi_pulse
 ```
 
 The application will start on `http://127.0.0.1:8009` with WebSocket ping/pong configured for long-running connections.
@@ -154,7 +157,7 @@ Number concentration stream:
 
 ## Stream Consumer
 
-The [streams/consumer.py](streams/consumer.py) module handles SSE stream consumption with:
+The [app/streams/consumer.py](app/streams/consumer.py) module handles SSE stream consumption with:
 - **Automatic reconnection**: Recovers from connection failures
 - **Exponential backoff**: Starts at 1s, doubles up to 30s maximum
 - **Reactive integration**: Seamlessly updates Shiny reactive values under lock
