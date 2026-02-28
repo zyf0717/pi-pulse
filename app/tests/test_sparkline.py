@@ -1,10 +1,10 @@
-from pathlib import Path
-from types import ModuleType
 import importlib.util
 import sys
+from pathlib import Path
+from types import ModuleType
 
 
-ROOT = Path(__file__).resolve().parents[1]
+APP_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _load_sparkline_module(monkeypatch):
@@ -14,9 +14,9 @@ def _load_sparkline_module(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "shiny", fake_shiny)
 
-    module_name = "sparkline_under_test"
+    module_name = "app.sparkline_under_test"
     sys.modules.pop(module_name, None)
-    spec = importlib.util.spec_from_file_location(module_name, ROOT / "sparkline.py")
+    spec = importlib.util.spec_from_file_location(module_name, APP_ROOT / "sparkline.py")
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)

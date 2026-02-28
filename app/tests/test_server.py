@@ -4,7 +4,7 @@ import importlib.util
 import sys
 
 
-ROOT = Path(__file__).resolve().parents[1]
+APP_ROOT = Path(__file__).resolve().parents[1]
 
 
 class _FakeTask:
@@ -73,26 +73,31 @@ def _load_server_module(monkeypatch):
     fake_graph_objects.FigureWidget = _FakeFigureWidget
     fake_plotly.graph_objects = fake_graph_objects
 
+    fake_app = ModuleType("app")
+    fake_app.__path__ = []
+    fake_app_renders = ModuleType("app.renders")
+    fake_app_renders.__path__ = []
+    fake_app_streams = ModuleType("app.streams")
+    fake_app_streams.__path__ = []
+
     fake_renders = ModuleType("renders")
     fake_renders.__path__ = []
 
-    fake_pulse = ModuleType("renders.pulse")
+    fake_pulse = ModuleType("app.renders.pulse")
 
     def register_pulse_renders(*args) -> None:
         calls["pulse_register"].append(args)
 
     fake_pulse.register_pulse_renders = register_pulse_renders
 
-    fake_sen66 = ModuleType("renders.sen66")
+    fake_sen66 = ModuleType("app.renders.sen66")
 
     def register_sen66_renders(*args) -> None:
         calls["sen66_register"].append(args)
 
     fake_sen66.register_sen66_renders = register_sen66_renders
 
-    fake_streams = ModuleType("streams")
-    fake_streams.__path__ = []
-    fake_consumer = ModuleType("streams.consumer")
+    fake_consumer = ModuleType("app.streams.consumer")
 
     def stream_consumer(label, url, on_data):
         payload = {"label": label, "url": url, "on_data": on_data}
@@ -101,20 +106,21 @@ def _load_server_module(monkeypatch):
 
     fake_consumer.stream_consumer = stream_consumer
 
-    monkeypatch.setitem(sys.modules, "config", fake_config)
+    monkeypatch.setitem(sys.modules, "app", fake_app)
+    monkeypatch.setitem(sys.modules, "app.config", fake_config)
     monkeypatch.setitem(sys.modules, "shinyswatch", fake_shinyswatch)
     monkeypatch.setitem(sys.modules, "shiny", fake_shiny)
     monkeypatch.setitem(sys.modules, "plotly", fake_plotly)
     monkeypatch.setitem(sys.modules, "plotly.graph_objects", fake_graph_objects)
-    monkeypatch.setitem(sys.modules, "renders", fake_renders)
-    monkeypatch.setitem(sys.modules, "renders.pulse", fake_pulse)
-    monkeypatch.setitem(sys.modules, "renders.sen66", fake_sen66)
-    monkeypatch.setitem(sys.modules, "streams", fake_streams)
-    monkeypatch.setitem(sys.modules, "streams.consumer", fake_consumer)
+    monkeypatch.setitem(sys.modules, "app.renders", fake_app_renders)
+    monkeypatch.setitem(sys.modules, "app.renders.pulse", fake_pulse)
+    monkeypatch.setitem(sys.modules, "app.renders.sen66", fake_sen66)
+    monkeypatch.setitem(sys.modules, "app.streams", fake_app_streams)
+    monkeypatch.setitem(sys.modules, "app.streams.consumer", fake_consumer)
 
-    module_name = "server_under_test"
+    module_name = "app.server_under_test"
     sys.modules.pop(module_name, None)
-    spec = importlib.util.spec_from_file_location(module_name, ROOT / "server.py")
+    spec = importlib.util.spec_from_file_location(module_name, APP_ROOT / "server.py")
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)

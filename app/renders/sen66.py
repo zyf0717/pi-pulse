@@ -6,14 +6,14 @@ import plotly.graph_objects as go
 from shiny import reactive, render, ui
 from shinywidgets import render_widget
 
-from config import SEN66_DEVICES
-from renders.render_utils import (
+from app.config import SEN66_DEVICES
+from app.renders.render_utils import (
     metric_value,
     needs_chart_rebuild,
     reset_chart_state,
     sparkline_values,
 )
-from sparkline import sparkline
+from app.sparkline import sparkline
 
 _NO_DATA_ANNOTATION = dict(
     text="No SEN66 data is available for this device.",

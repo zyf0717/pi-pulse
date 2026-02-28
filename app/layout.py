@@ -3,7 +3,7 @@ from faicons import icon_svg
 from shiny import ui
 from shinywidgets import output_widget
 
-from config import ALL_DEVICES, ALL_DEVICES_DEFAULT, PULSE_CHARTS, SEN66_CHARTS
+from app.config import ALL_DEVICES, ALL_DEVICES_DEFAULT, PULSE_CHARTS, SEN66_CHARTS
 
 _INFO_ICON = icon_svg("circle-info", fill="currentColor", height="1em")
 _CARD_ATTRS_CLASS = "metric-card-trigger"

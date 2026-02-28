@@ -1,11 +1,11 @@
 from collections import deque
-from pathlib import Path
-from types import ModuleType, SimpleNamespace
 import importlib.util
 import sys
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 
-ROOT = Path(__file__).resolve().parents[1]
+APP_ROOT = Path(__file__).resolve().parents[1]
 
 
 class _Registry:
@@ -121,11 +121,16 @@ def _load_render_module(monkeypatch, filename: str, config_attrs: dict):
     fake_graph_objects.FigureWidget = _FakeFigureWidget
     fake_plotly.graph_objects = fake_graph_objects
 
-    fake_config = ModuleType("config")
+    fake_app = ModuleType("app")
+    fake_app.__path__ = []
+    fake_app_renders = ModuleType("app.renders")
+    fake_app_renders.__path__ = []
+
+    fake_config = ModuleType("app.config")
     for key, value in config_attrs.items():
         setattr(fake_config, key, value)
 
-    fake_sparkline = ModuleType("sparkline")
+    fake_sparkline = ModuleType("app.sparkline")
 
     def sparkline(values, fmt=None):
         rendered = [fmt(value) for value in values] if fmt else list(values)
@@ -133,16 +138,43 @@ def _load_render_module(monkeypatch, filename: str, config_attrs: dict):
 
     fake_sparkline.sparkline = sparkline
 
+    fake_render_utils = ModuleType("app.renders.render_utils")
+
+    def metric_value(device, devices, latest, field, formatter):
+        if device not in devices:
+            return "N/A"
+        return formatter(latest[device]().get(field, 0.0))
+
+    def sparkline_values(device, devices, latest, history, field, *, scale=1.0):
+        if device not in devices:
+            return None
+        latest[device]()
+        return [data.get(field, 0.0) * scale for _, data in history[device]]
+
+    def reset_chart_state(state):
+        state.update({"chart": None, "dev": None, "tpl": None})
+
+    def needs_chart_rebuild(state, chart, dev, tpl):
+        return state["chart"] != chart or state["dev"] != dev or state["tpl"] != tpl
+
+    fake_render_utils.metric_value = metric_value
+    fake_render_utils.sparkline_values = sparkline_values
+    fake_render_utils.reset_chart_state = reset_chart_state
+    fake_render_utils.needs_chart_rebuild = needs_chart_rebuild
+
     monkeypatch.setitem(sys.modules, "shiny", fake_shiny)
     monkeypatch.setitem(sys.modules, "shinywidgets", fake_shinywidgets)
     monkeypatch.setitem(sys.modules, "plotly", fake_plotly)
     monkeypatch.setitem(sys.modules, "plotly.graph_objects", fake_graph_objects)
-    monkeypatch.setitem(sys.modules, "config", fake_config)
-    monkeypatch.setitem(sys.modules, "sparkline", fake_sparkline)
+    monkeypatch.setitem(sys.modules, "app", fake_app)
+    monkeypatch.setitem(sys.modules, "app.renders", fake_app_renders)
+    monkeypatch.setitem(sys.modules, "app.config", fake_config)
+    monkeypatch.setitem(sys.modules, "app.sparkline", fake_sparkline)
+    monkeypatch.setitem(sys.modules, "app.renders.render_utils", fake_render_utils)
 
-    module_name = f"{Path(filename).stem}_under_test"
+    module_name = f"app.renders.{Path(filename).stem}_under_test"
     sys.modules.pop(module_name, None)
-    spec = importlib.util.spec_from_file_location(module_name, ROOT / "renders" / filename)
+    spec = importlib.util.spec_from_file_location(module_name, APP_ROOT / "renders" / filename)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)

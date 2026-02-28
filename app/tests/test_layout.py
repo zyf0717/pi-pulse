@@ -1,10 +1,10 @@
-from pathlib import Path
-from types import ModuleType, SimpleNamespace
 import importlib.util
 import sys
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 
-ROOT = Path(__file__).resolve().parents[1]
+APP_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _tag_factory(name: str):
@@ -49,7 +49,9 @@ def _load_layout_module(monkeypatch):
     fake_shinywidgets = ModuleType("shinywidgets")
     fake_shinywidgets.output_widget = _tag_factory("output_widget")
 
-    fake_config = ModuleType("config")
+    fake_app = ModuleType("app")
+    fake_app.__path__ = []
+    fake_config = ModuleType("app.config")
     fake_config.ALL_DEVICES = {"10": "10 (192.168.121.10)", "11": "11 (192.168.121.11)"}
     fake_config.ALL_DEVICES_DEFAULT = "11"
     fake_config.PULSE_CHARTS = {
@@ -71,11 +73,12 @@ def _load_layout_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "shinyswatch", fake_shinyswatch)
     monkeypatch.setitem(sys.modules, "faicons", fake_faicons)
     monkeypatch.setitem(sys.modules, "shinywidgets", fake_shinywidgets)
-    monkeypatch.setitem(sys.modules, "config", fake_config)
+    monkeypatch.setitem(sys.modules, "app", fake_app)
+    monkeypatch.setitem(sys.modules, "app.config", fake_config)
 
-    module_name = "layout_under_test"
+    module_name = "app.layout_under_test"
     sys.modules.pop(module_name, None)
-    spec = importlib.util.spec_from_file_location(module_name, ROOT / "layout.py")
+    spec = importlib.util.spec_from_file_location(module_name, APP_ROOT / "layout.py")
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)

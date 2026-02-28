@@ -1,11 +1,11 @@
 import asyncio
-from pathlib import Path
-from types import ModuleType
 import importlib.util
 import sys
+from pathlib import Path
+from types import ModuleType
 
 
-ROOT = Path(__file__).resolve().parents[1]
+APP_ROOT = Path(__file__).resolve().parents[1]
 
 
 class _AsyncNullContext:
@@ -77,17 +77,20 @@ def _load_consumer_module(monkeypatch):
 
     fake_shiny.reactive = _Reactive()
 
+    fake_app = ModuleType("app")
+    fake_app.__path__ = []
     fake_streams = ModuleType("streams")
     fake_streams.__path__ = []
 
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
     monkeypatch.setitem(sys.modules, "shiny", fake_shiny)
-    monkeypatch.setitem(sys.modules, "streams", fake_streams)
+    monkeypatch.setitem(sys.modules, "app", fake_app)
+    monkeypatch.setitem(sys.modules, "app.streams", fake_streams)
 
-    module_name = "streams.consumer_under_test"
+    module_name = "app.streams.consumer_under_test"
     sys.modules.pop(module_name, None)
     spec = importlib.util.spec_from_file_location(
-        module_name, ROOT / "streams" / "consumer.py"
+        module_name, APP_ROOT / "streams" / "consumer.py"
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
