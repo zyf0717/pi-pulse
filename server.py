@@ -103,13 +103,13 @@ def server(input, output, session):
     session.on_ended(lambda: [t.cancel() for t in tasks])
 
     # ── Register renders ──────────────────────────────────────────────────────
-    pulse_widget = go.FigureWidget(layout=dict(autosize=True))
+    pulse_widget = go.FigureWidget(layout=dict(autosize=True, height=400))
     pulse_state: dict = {"chart": None, "dev": None, "tpl": None}
     register_pulse_renders(
         input, pulse_latest, pulse_temp_history, plotly_tpl, pulse_widget, pulse_state
     )
 
-    sen66_widget = go.FigureWidget(layout=dict(autosize=True))
+    sen66_widget = go.FigureWidget(layout=dict(autosize=True, height=400))
     sen66_state: dict = {"chart": None, "dev": None, "tpl": None}
     register_sen66_renders(
         input,
