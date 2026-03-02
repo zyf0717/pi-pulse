@@ -41,6 +41,12 @@ def _load_server_module(monkeypatch):
             "nc_stream": "http://sen66-11/nc",
         }
     }
+    fake_config.H10_DEVICES = {
+        "11": {
+            "label": "11 (192.168.121.11)",
+            "stream": "http://h10-11",
+        }
+    }
 
     fake_shinyswatch = ModuleType("shinyswatch")
 
@@ -97,6 +103,13 @@ def _load_server_module(monkeypatch):
 
     fake_sen66.register_sen66_renders = register_sen66_renders
 
+    fake_h10 = ModuleType("app.renders.h10")
+
+    def register_h10_renders(*args) -> None:
+        calls.setdefault("h10_register", []).append(args)
+
+    fake_h10.register_h10_renders = register_h10_renders
+
     fake_consumer = ModuleType("app.streams.consumer")
 
     def stream_consumer(label, url, on_data):
@@ -115,6 +128,7 @@ def _load_server_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "app.renders", fake_app_renders)
     monkeypatch.setitem(sys.modules, "app.renders.pulse", fake_pulse)
     monkeypatch.setitem(sys.modules, "app.renders.sen66", fake_sen66)
+    monkeypatch.setitem(sys.modules, "app.renders.h10", fake_h10)
     monkeypatch.setitem(sys.modules, "app.streams", fake_app_streams)
     monkeypatch.setitem(sys.modules, "app.streams.consumer", fake_consumer)
 
@@ -155,20 +169,23 @@ def test_server_wires_stream_tasks_and_registers_renders(monkeypatch) -> None:
     server_module.server(_FakeInput(), output=None, session=session)
 
     assert calls["theme_picker_server"] == 1
-    assert len(calls["stream_consumer"]) == 3
+    assert len(calls["stream_consumer"]) == 4
     assert [call["label"] for call in calls["stream_consumer"]] == [
         "pulse-10",
         "sen66-11",
         "sen66-nc-11",
+        "h10-11",
     ]
     assert [call["url"] for call in calls["stream_consumer"]] == [
         "http://pulse-10",
         "http://sen66-11",
         "http://sen66-11/nc",
+        "http://h10-11",
     ]
-    assert len(calls["create_task"]) == 3
+    assert len(calls["create_task"]) == 4
     assert len(calls["pulse_register"]) == 1
     assert len(calls["sen66_register"]) == 1
+    assert len(calls["h10_register"]) == 1
 
 
 def test_server_registers_session_cleanup_that_cancels_all_tasks(monkeypatch) -> None:
@@ -181,7 +198,7 @@ def test_server_registers_session_cleanup_that_cancels_all_tasks(monkeypatch) ->
 
     session.ended_callback()
 
-    assert [task.cancel_calls for task in calls["create_task"]] == [1, 1, 1]
+    assert [task.cancel_calls for task in calls["create_task"]] == [1, 1, 1, 1]
 
 
 def test_server_initializes_chart_state_for_render_registration(monkeypatch) -> None:
@@ -192,10 +209,29 @@ def test_server_initializes_chart_state_for_render_registration(monkeypatch) -> 
 
     pulse_args = calls["pulse_register"][0]
     sen66_args = calls["sen66_register"][0]
+    h10_args = calls["h10_register"][0]
 
     assert isinstance(pulse_args[4], _FakeFigureWidget)
     assert pulse_args[5] == {"chart": None, "dev": None, "tpl": None}
     assert isinstance(sen66_args[6], _FakeFigureWidget)
     assert sen66_args[7] == {"chart": None, "dev": None, "tpl": None}
+    assert isinstance(h10_args[4], _FakeFigureWidget)
+    assert h10_args[5] == {"chart": None, "dev": None, "tpl": None}
     assert pulse_args[0].chart_style() == "plotly_dark"
     assert sen66_args[0].chart_style() == "plotly_dark"
+    assert h10_args[0].chart_style() == "plotly_dark"
+
+
+def test_normalize_h10_sample_handles_common_ble_field_names(monkeypatch) -> None:
+    server_module, _ = _load_server_module(monkeypatch)
+
+    normalized = server_module._normalize_h10_sample(
+        {"bpm": 72, "rr": [824, 840], "battery_pct": 95}
+    )
+
+    assert normalized["heart_rate_bpm"] == 72.0
+    assert normalized["rr_intervals_ms"] == [824.0, 840.0]
+    assert normalized["rr_last_ms"] == 840.0
+    assert normalized["rr_avg_ms"] == 832.0
+    assert normalized["rr_count"] == 2
+    assert normalized["battery_pct"] == 95
