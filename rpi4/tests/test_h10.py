@@ -5,6 +5,8 @@ Covers:
 - hr_stream             — SSE framing verified via max_frames + feeder task
 - parse_ecg_frame       — PMD frame parsing, sign-extension, error paths
 - ecg_stream            — SSE framing verified via max_frames + feeder task
+- parse_acc_frame       — PMD accelerometer parsing, error paths
+- acc_stream            — SSE framing verified via max_frames + feeder task
 - FastAPI /health       — route response body
 """
 
@@ -281,7 +283,7 @@ def test_parse_ecg_frame_raises_on_wrong_measurement_type():
     h10 = _load_h10()
     import pytest
 
-    packet = _build_ecg_packet([100], meas_type=0x05)  # 0x05 = ACC, not ECG
+    packet = _build_ecg_packet([100], meas_type=h10.PMD_MEAS_TYPE_ACC)
     with pytest.raises(ValueError, match="ECG"):
         h10.parse_ecg_frame(packet)
 
@@ -313,6 +315,82 @@ def test_parse_ecg_frame_mixed_samples():
     packet = _build_ecg_packet(samples)
     result = h10.parse_ecg_frame(packet)
     assert result == samples
+
+
+# ── parse_acc_frame ───────────────────────────────────────────────────────────
+# Pure synchronous function — no async infrastructure needed.
+
+
+def _build_acc_packet(
+    samples_xyz_mg: list[tuple[int, int, int]],
+    meas_type: int = 0x02,
+    frame_type_byte: int = 0x00,
+) -> bytes:
+    """Build a minimal PMD accelerometer packet with 16-bit x/y/z samples."""
+    header = bytes([meas_type]) + b"\x00" * 8 + bytes([frame_type_byte])
+    payload = b""
+    for x_mg, y_mg, z_mg in samples_xyz_mg:
+        payload += struct.pack("<hhh", x_mg, y_mg, z_mg)
+    return header + payload
+
+
+def test_parse_acc_frame_xyz_samples():
+    """Signed 16-bit x/y/z values round-trip correctly."""
+    h10 = _load_h10()
+    samples = [(10, -20, 30), (-1000, 0, 1000)]
+    packet = _build_acc_packet(samples)
+    result = h10.parse_acc_frame(packet)
+    assert result == [
+        {"x_mg": 10, "y_mg": -20, "z_mg": 30},
+        {"x_mg": -1000, "y_mg": 0, "z_mg": 1000},
+    ]
+
+
+def test_parse_acc_frame_empty_payload_returns_empty_list():
+    """Header only (no sample bytes) -> empty list, no error."""
+    h10 = _load_h10()
+    packet = _build_acc_packet([])
+    result = h10.parse_acc_frame(packet)
+    assert result == []
+
+
+def test_parse_acc_frame_raises_on_short_frame():
+    """Frames shorter than 10 bytes raise ValueError."""
+    h10 = _load_h10()
+    import pytest
+
+    with pytest.raises(ValueError, match="too short"):
+        h10.parse_acc_frame(b"\x02" * 9)
+
+
+def test_parse_acc_frame_raises_on_wrong_measurement_type():
+    """Measurement type != ACC raises ValueError."""
+    h10 = _load_h10()
+    import pytest
+
+    packet = _build_acc_packet([(1, 2, 3)], meas_type=h10.PMD_MEAS_TYPE_ECG)
+    with pytest.raises(ValueError, match="ACC"):
+        h10.parse_acc_frame(packet)
+
+
+def test_parse_acc_frame_raises_on_compressed_frame():
+    """Compressed ACC frames are rejected."""
+    h10 = _load_h10()
+    import pytest
+
+    packet = _build_acc_packet([(1, 2, 3)], frame_type_byte=0x80)
+    with pytest.raises(ValueError, match="[Cc]ompressed"):
+        h10.parse_acc_frame(packet)
+
+
+def test_parse_acc_frame_raises_on_nonzero_frame_type():
+    """Only uncompressed Type 0 ACC frames are supported."""
+    h10 = _load_h10()
+    import pytest
+
+    packet = _build_acc_packet([(1, 2, 3)], frame_type_byte=0x01)
+    with pytest.raises(ValueError, match="frame type"):
+        h10.parse_acc_frame(packet)
 
 
 # ── ecg_stream — SSE framing ──────────────────────────────────────────────────
@@ -384,6 +462,85 @@ def test_ecg_stream_subscriber_cleaned_up_after_exit():
     h10 = _load_h10()
     asyncio.run(_collect_ecg_frames(h10, n=1))
     assert len(h10._ecg_subscribers) == 0
+
+
+# ── acc_stream — SSE framing ──────────────────────────────────────────────────
+# acc_stream blocks on Queue.get() waiting for PMD Data notifications.
+# The feeder coroutine simulates those by writing into _acc_subscribers.
+
+
+async def _collect_acc_frames(mod, n, payload=None):
+    """
+    Run acc_stream(max_frames=n) while concurrently feeding it n fake payloads.
+
+    Mirrors _collect_ecg_frames; uses _acc_subscribers instead of _ecg_subscribers.
+    """
+    if payload is None:
+        payload = {
+            "samples_mg": [{"x_mg": 1, "y_mg": -2, "z_mg": 3}],
+            "sample_rate_hz": 200,
+            "range_g": 8,
+        }
+
+    async def feeder():
+        for _ in range(n):
+            await asyncio.sleep(0)
+            async with mod._acc_subscribers_lock:
+                for q in list(mod._acc_subscribers):
+                    try:
+                        q.put_nowait(payload)
+                    except asyncio.QueueFull:
+                        pass
+
+    feeder_task = asyncio.create_task(feeder())
+    frames = []
+    async for frame in mod.acc_stream(max_frames=n):
+        frames.append(frame)
+    await feeder_task
+    return frames
+
+
+def test_acc_stream_single_frame_has_sse_prefix():
+    h10 = _load_h10()
+    frames = asyncio.run(_collect_acc_frames(h10, n=1))
+    assert len(frames) == 1
+    assert frames[0].startswith("data: ")
+
+
+def test_acc_stream_single_frame_is_valid_json():
+    h10 = _load_h10()
+    frames = asyncio.run(_collect_acc_frames(h10, n=1))
+    payload = json.loads(frames[0][len("data: ") :].strip())
+    assert "samples_mg" in payload
+    assert "sample_rate_hz" in payload
+    assert "range_g" in payload
+
+
+def test_acc_stream_terminates_after_max_frames():
+    """Generator must yield exactly N frames then stop."""
+    h10 = _load_h10()
+    frames = asyncio.run(_collect_acc_frames(h10, n=3))
+    assert len(frames) == 3
+
+
+def test_acc_stream_frame_contains_correct_payload():
+    """Payload values match the data injected by the feeder."""
+    h10 = _load_h10()
+    expected = {
+        "samples_mg": [{"x_mg": -12, "y_mg": 34, "z_mg": -56}],
+        "sample_rate_hz": 200,
+        "range_g": 8,
+    }
+    frames = asyncio.run(_collect_acc_frames(h10, n=1, payload=expected))
+    result = json.loads(frames[0][len("data: ") :].strip())
+    assert result == expected
+
+
+def test_acc_stream_subscriber_cleaned_up_after_exit():
+    """After the generator exits, its queue is removed from _acc_subscribers."""
+    h10 = _load_h10()
+    asyncio.run(_collect_acc_frames(h10, n=1))
+    assert len(h10._acc_subscribers) == 0
 
 
 # ── FastAPI /health ───────────────────────────────────────────────────────────

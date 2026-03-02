@@ -1,5 +1,5 @@
 """
-h10.py — Polar H10 heart-rate + ECG BLE → Server-Sent Events
+h10.py — Polar H10 heart-rate + ECG + accelerometer BLE → Server-Sent Events
 Mirrors the output-stream style of pulse.py and sen66.py.
 
 Endpoints
@@ -7,6 +7,7 @@ Endpoints
 GET /health       – liveness probe
 GET /stream       – SSE: heart-rate (bpm) + RR intervals (ms) at notification rate
 GET /ecg-stream   – SSE: ECG samples (µV) at 130 Hz, batched per PMD packet
+GET /acc-stream   – SSE: accelerometer samples (mG) at 200 Hz, batched per PMD packet
 
 BLE device
 ----------
@@ -30,7 +31,11 @@ PMD Data frame layout (per notification):
   byte 9    : frame_type_byte (bit 7 = compressed; bits 0-6 = frame type)
   bytes 10+ : ECG samples, 3 bytes each, signed 24-bit little-endian, µV
 
-Only uncompressed Type 0 frames are produced by the H10.
+Polar's H10 product documentation states the SDK also exposes accelerometer data
+with sample rates 25/50/100/200 Hz, ranges 2G/4G/8G, and axis values in mG.
+This implementation starts ACC at 200 Hz, 16-bit resolution, 8G range.
+
+Only uncompressed Type 0 frames are handled here.
 """
 
 import asyncio
@@ -54,11 +59,19 @@ PMD_SERVICE_UUID = "FB005C80-02E7-F387-1CAD-8ACD2D8DF0C8"
 PMD_CP_UUID = "FB005C81-02E7-F387-1CAD-8ACD2D8DF0C8"
 PMD_DATA_UUID = "FB005C82-02E7-F387-1CAD-8ACD2D8DF0C8"
 
+# Polar PMD measurement types used by this module.
+PMD_MEAS_TYPE_ECG = 0x00
+PMD_MEAS_TYPE_ACC = 0x02
+
+ECG_SAMPLE_RATE_HZ = 130
+ACC_SAMPLE_RATE_HZ = 200
+ACC_RANGE_G = 8
+
 # Command: start ECG at 130 Hz / 14-bit resolution
 ECG_START_CMD = bytearray(
     [
         0x02,
-        0x00,  # op=START_MEASUREMENT, type=ECG
+        PMD_MEAS_TYPE_ECG,  # op=START_MEASUREMENT, type=ECG
         0x00,
         0x01,
         0x82,
@@ -67,6 +80,26 @@ ECG_START_CMD = bytearray(
         0x01,
         0x0E,
         0x00,  # setting RESOLUTION=14  (uint16 LE)
+    ]
+)
+
+# Command: start ACC at 200 Hz / 16-bit resolution / 8G range
+ACC_START_CMD = bytearray(
+    [
+        0x02,
+        PMD_MEAS_TYPE_ACC,  # op=START_MEASUREMENT, type=ACC
+        0x00,
+        0x01,
+        0xC8,
+        0x00,  # setting SAMPLE_RATE=200 (uint16 LE)
+        0x01,
+        0x01,
+        0x10,
+        0x00,  # setting RESOLUTION=16 (uint16 LE)
+        0x02,
+        0x01,
+        0x08,
+        0x00,  # setting RANGE=8G (uint16 LE)
     ]
 )
 
@@ -82,6 +115,10 @@ _subscribers_lock = asyncio.Lock()
 # ECG subscribers — same fan-out pattern; each item is a list of µV samples.
 _ecg_subscribers: List[asyncio.Queue] = []
 _ecg_subscribers_lock = asyncio.Lock()
+
+# Accelerometer subscribers — each item is a batch of x/y/z samples in mG.
+_acc_subscribers: List[asyncio.Queue] = []
+_acc_subscribers_lock = asyncio.Lock()
 
 
 # ── HR packet parser ──────────────────────────────────────────────────────────
@@ -143,8 +180,10 @@ def parse_ecg_frame(data: bytes) -> List[int]:
         raise ValueError(f"PMD frame too short: {len(data)} bytes")
 
     meas_type = data[0]
-    if meas_type != 0x00:
-        raise ValueError(f"Expected ECG (0x00), got measurement type {meas_type:#04x}")
+    if meas_type != PMD_MEAS_TYPE_ECG:
+        raise ValueError(
+            f"Expected ECG ({PMD_MEAS_TYPE_ECG:#04x}), got measurement type {meas_type:#04x}"
+        )
 
     frame_type_byte = data[9]
     compressed = bool(frame_type_byte & 0x80)
@@ -171,19 +210,68 @@ def parse_ecg_frame(data: bytes) -> List[int]:
     return samples
 
 
+def parse_acc_frame(data: bytes) -> List[dict]:
+    """
+    Parse a Polar PMD Data notification carrying accelerometer samples.
+
+    Frame layout mirrors ECG:
+      byte 0    : measurement type (ACC for H10 PMD)
+      bytes 1-8 : 64-bit timestamp, little-endian
+      byte 9    : frame_type_byte
+                    bit 7 = 1 → compressed (unsupported here)
+                    bits 0-6   → frame type (0 = uncompressed Type 0)
+      bytes 10+ : ACC samples, 6 bytes each, little-endian:
+                    int16 x, int16 y, int16 z (all in mG)
+
+    Returns a list of dicts:
+      [{"x_mg": int, "y_mg": int, "z_mg": int}, ...]
+    """
+    if len(data) < 10:
+        raise ValueError(f"PMD frame too short: {len(data)} bytes")
+
+    meas_type = data[0]
+    if meas_type != PMD_MEAS_TYPE_ACC:
+        raise ValueError(
+            f"Expected ACC ({PMD_MEAS_TYPE_ACC:#04x}), got measurement type {meas_type:#04x}"
+        )
+
+    frame_type_byte = data[9]
+    compressed = bool(frame_type_byte & 0x80)
+    frame_type = frame_type_byte & 0x7F
+
+    if compressed:
+        raise ValueError(
+            f"Compressed ACC frames are not supported (frame type byte {frame_type_byte:#04x})"
+        )
+    if frame_type != 0:
+        raise ValueError(
+            f"Unsupported ACC frame type {frame_type} (only Type 0 implemented)"
+        )
+
+    samples: List[dict] = []
+    payload = data[10:]
+    for i in range(0, len(payload) - 5, 6):
+        x_mg, y_mg, z_mg = struct.unpack_from("<hhh", payload, i)
+        samples.append({"x_mg": x_mg, "y_mg": y_mg, "z_mg": z_mg})
+
+    return samples
+
+
 # ── BLE background loop ───────────────────────────────────────────────────────
 
 
 async def ble_loop(stop_event: asyncio.Event) -> None:
     """
-    Connect to the H10, subscribe to HR notifications and start ECG streaming,
-    then fan-out each parsed reading to all active SSE subscriber queues.
+    Connect to the H10, subscribe to HR notifications and start ECG + ACC
+    streaming, then fan-out each parsed reading to all active SSE subscriber
+    queues.
 
     Reconnects automatically on disconnection or BLE error.
     """
     global _latest
 
     def handle_hr_notification(_: int, data: bytearray) -> None:
+        global _latest
         reading = parse_hr_measurement(bytes(data))
         _latest = reading
         for q in list(_subscribers):
@@ -192,17 +280,41 @@ async def ble_loop(stop_event: asyncio.Event) -> None:
             except asyncio.QueueFull:
                 pass
 
-    def handle_ecg_notification(_: int, data: bytearray) -> None:
-        try:
-            samples = parse_ecg_frame(bytes(data))
-        except ValueError:
+    def handle_pmd_notification(_: int, data: bytearray) -> None:
+        packet = bytes(data)
+        if not packet:
             return
-        payload = {"samples_uv": samples, "sample_rate_hz": 130}
-        for q in list(_ecg_subscribers):
+
+        meas_type = packet[0]
+
+        if meas_type == PMD_MEAS_TYPE_ECG:
             try:
-                q.put_nowait(payload)
-            except asyncio.QueueFull:
-                pass
+                samples = parse_ecg_frame(packet)
+            except ValueError:
+                return
+            payload = {"samples_uv": samples, "sample_rate_hz": ECG_SAMPLE_RATE_HZ}
+            for q in list(_ecg_subscribers):
+                try:
+                    q.put_nowait(payload)
+                except asyncio.QueueFull:
+                    pass
+            return
+
+        if meas_type == PMD_MEAS_TYPE_ACC:
+            try:
+                samples = parse_acc_frame(packet)
+            except ValueError:
+                return
+            payload = {
+                "samples_mg": samples,
+                "sample_rate_hz": ACC_SAMPLE_RATE_HZ,
+                "range_g": ACC_RANGE_G,
+            }
+            for q in list(_acc_subscribers):
+                try:
+                    q.put_nowait(payload)
+                except asyncio.QueueFull:
+                    pass
 
     while not stop_event.is_set():
         try:
@@ -214,10 +326,15 @@ async def ble_loop(stop_event: asyncio.Event) -> None:
                 # 1. Enable notifications on the PMD control point so we can
                 #    receive the start-measurement acknowledgement.
                 await client.start_notify(PMD_CP_UUID, lambda _h, _d: None)
-                # 2. Write the start-ECG command and wait for the ack.
+                # 2. Subscribe to PMD data frames (ECG + ACC share one char)
+                #    before starting streams so the first packets are not lost.
+                await client.start_notify(PMD_DATA_UUID, handle_pmd_notification)
+                # 3. Write start commands for the desired PMD streams.
                 await client.write_gatt_char(PMD_CP_UUID, ECG_START_CMD, response=True)
-                # 3. Subscribe to actual ECG data frames.
-                await client.start_notify(PMD_DATA_UUID, handle_ecg_notification)
+                try:
+                    await client.write_gatt_char(PMD_CP_UUID, ACC_START_CMD, response=True)
+                except Exception as exc:
+                    print(f"[h10] ACC stream unavailable: {exc}")
 
                 # Wait until the server is shutting down or the device drops.
                 await stop_event.wait()
@@ -351,6 +468,39 @@ async def ecg_stream(max_frames: Optional[int] = None):
                 pass
 
 
+async def acc_stream(max_frames: Optional[int] = None):
+    """
+    Async generator yielding SSE-formatted accelerometer frames.
+
+    Each frame contains a batch of samples from one PMD Data notification:
+      {"samples_mg": [{"x_mg": int, "y_mg": int, "z_mg": int}, ...],
+       "sample_rate_hz": 200,
+       "range_g": 8}
+
+    Args:
+        max_frames: Terminate after this many frames (None = run forever).
+    """
+    q: asyncio.Queue = asyncio.Queue(maxsize=64)
+
+    async with _acc_subscribers_lock:
+        _acc_subscribers.append(q)
+
+    frame = 0
+    try:
+        while max_frames is None or frame < max_frames:
+            payload = await q.get()
+            yield f"data: {json.dumps(payload)}\n\n"
+            frame += 1
+    except asyncio.CancelledError:
+        return
+    finally:
+        async with _acc_subscribers_lock:
+            try:
+                _acc_subscribers.remove(q)
+            except ValueError:
+                pass
+
+
 @app.get("/ecg-stream")
 async def ecg_stream_endpoint():
     """SSE stream: batched ECG samples (µV) at 130 Hz from the Polar PMD service."""
@@ -360,4 +510,16 @@ async def ecg_stream_endpoint():
     }
     return StreamingResponse(
         ecg_stream(), media_type="text/event-stream", headers=headers
+    )
+
+
+@app.get("/acc-stream")
+async def acc_stream_endpoint():
+    """SSE stream: batched accelerometer samples (mG) at 200 Hz from Polar PMD."""
+    headers = {
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(
+        acc_stream(), media_type="text/event-stream", headers=headers
     )
