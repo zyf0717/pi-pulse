@@ -1,0 +1,21 @@
+[Unit]
+Description=H10 — Polar H10 Heart-Rate BLE API (bpm / RR intervals)
+After=network.target bluetooth.target
+
+[Service]
+Type=simple
+User=${SERVICE_USER}
+WorkingDirectory=${WORKING_DIR}
+ExecStart=${UVICORN_BIN} h10:app --host 0.0.0.0 --port 8003
+Restart=on-failure
+RestartSec=5
+
+# Give the Bluetooth stack time to be ready after boot
+ExecStartPre=/bin/sleep 5
+
+# BLE access — ensure ${SERVICE_USER} is in the bluetooth group:
+#   sudo usermod -aG bluetooth ${SERVICE_USER}
+SupplementaryGroups=bluetooth
+
+[Install]
+WantedBy=multi-user.target

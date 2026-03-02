@@ -1,0 +1,21 @@
+[Unit]
+Description=Sen66 — Air Quality API (PM / CO2 / VOC / NOx / RH / T)
+After=network.target
+
+[Service]
+Type=simple
+User=${SERVICE_USER}
+WorkingDirectory=${WORKING_DIR}
+ExecStart=${UVICORN_BIN} sen66:app --host 0.0.0.0 --port 8002
+Restart=on-failure
+RestartSec=5
+
+# Give the I2C bus time to be ready after boot
+ExecStartPre=/bin/sleep 3
+
+# I2C bus access — ensure ${SERVICE_USER} is in the i2c group:
+#   sudo usermod -aG i2c ${SERVICE_USER}
+SupplementaryGroups=i2c
+
+[Install]
+WantedBy=multi-user.target
