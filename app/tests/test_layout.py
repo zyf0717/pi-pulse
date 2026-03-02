@@ -68,6 +68,10 @@ def _load_layout_module(monkeypatch):
         "pm_mass": "PM Mass Concentration (µg/m³)",
         "pm_nc": "PM Number Concentration (#/cm³)",
     }
+    fake_config.H10_CHARTS = {
+        "bpm": "Heart Rate (BPM)",
+        "rr": "Average RR Interval (ms)",
+    }
 
     monkeypatch.setitem(sys.modules, "shiny", fake_shiny)
     monkeypatch.setitem(sys.modules, "shinyswatch", fake_shinyswatch)
@@ -134,6 +138,21 @@ def test_sen66_cards_match_chart_mapping(monkeypatch) -> None:
         "co2",
         "voc_nox",
         "voc_nox",
+    ]
+
+
+def test_h10_cards_match_chart_mapping(monkeypatch) -> None:
+    module = _load_layout_module(monkeypatch)
+
+    cards = module._h10_cards()
+
+    assert len(cards) == 4
+    assert [card["kwargs"]["data-chart-target"] for card in cards] == ["h10_chart"] * 4
+    assert [card["kwargs"]["data-chart-value"] for card in cards] == [
+        "bpm",
+        "rr",
+        "rr",
+        "rr",
     ]
 
 

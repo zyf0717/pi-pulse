@@ -8,3 +8,7 @@ sen66:
   "11":
     stream: http://192.168.121.11:8002/stream
     nc-stream: http://192.168.121.11:8002/nc-stream
+
+h10:
+  "11":
+    stream: http://192.168.121.11:8003/stream

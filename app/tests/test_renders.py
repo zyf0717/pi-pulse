@@ -57,10 +57,18 @@ class _FakeValue:
 
 
 class _FakeInput:
-    def __init__(self, *, device: str, pulse_chart: str = "temp", sen66_chart: str = "co2"):
+    def __init__(
+        self,
+        *,
+        device: str,
+        pulse_chart: str = "temp",
+        sen66_chart: str = "co2",
+        h10_chart: str = "bpm",
+    ):
         self._device = device
         self._pulse_chart = pulse_chart
         self._sen66_chart = sen66_chart
+        self._h10_chart = h10_chart
 
     def device(self) -> str:
         return self._device
@@ -70,6 +78,9 @@ class _FakeInput:
 
     def sen66_chart(self) -> str:
         return self._sen66_chart
+
+    def h10_chart(self) -> str:
+        return self._h10_chart
 
 
 class _BatchUpdate:
@@ -252,6 +263,87 @@ def test_sen66_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> No
     assert registry.ui["sen66_nox_spark"]() == ""
 
 
+def test_h10_value_boxes_and_payload_format_current_snapshot(monkeypatch) -> None:
+    module, registry = _load_render_module(
+        monkeypatch,
+        "h10.py",
+        {
+            "H10_DEVICES": {
+                "11": {
+                    "label": "11 (192.168.121.11)",
+                    "stream": "http://h10-11",
+                }
+            },
+            "H10_CHARTS": {
+                "bpm": "Heart Rate (BPM)",
+                "rr": "Average RR Interval (ms)",
+            },
+        },
+    )
+    input_obj = _FakeInput(device="11")
+    module.register_h10_renders(
+        input_obj,
+        {
+            "11": _FakeValue(
+                {
+                    "heart_rate_bpm": 72.0,
+                    "rr_avg_ms": 832.0,
+                    "rr_last_ms": 840.0,
+                    "rr_count": 2,
+                    "rr_intervals_ms": [824.0, 840.0],
+                }
+            )
+        },
+        {"11": deque()},
+        lambda: "plotly_dark",
+        _FakeFigureWidget(),
+        {"chart": None, "dev": None, "tpl": None},
+    )
+
+    assert registry.text["h10_bpm_val"]() == "72 bpm"
+    assert registry.text["h10_rr_avg_val"]() == "832 ms"
+    assert registry.text["h10_rr_last_val"]() == "840 ms"
+    assert registry.text["h10_rr_count_val"]() == "2"
+    assert '"heart_rate_bpm": 72.0' in registry.text["h10_payload"]()
+
+
+def test_h10_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> None:
+    module, registry = _load_render_module(
+        monkeypatch,
+        "h10.py",
+        {
+            "H10_DEVICES": {
+                "11": {
+                    "label": "11 (192.168.121.11)",
+                    "stream": "http://h10-11",
+                }
+            },
+            "H10_CHARTS": {
+                "bpm": "Heart Rate (BPM)",
+                "rr": "Average RR Interval (ms)",
+            },
+        },
+    )
+    input_obj = _FakeInput(device="99")
+    module.register_h10_renders(
+        input_obj,
+        {"11": _FakeValue({"heart_rate_bpm": 72.0, "rr_avg_ms": 832.0})},
+        {"11": deque()},
+        lambda: "plotly_dark",
+        _FakeFigureWidget(),
+        {"chart": None, "dev": None, "tpl": None},
+    )
+
+    assert registry.text["h10_bpm_val"]() == "N/A"
+    assert registry.text["h10_rr_avg_val"]() == "N/A"
+    assert registry.text["h10_rr_last_val"]() == "N/A"
+    assert registry.text["h10_rr_count_val"]() == "N/A"
+    assert registry.ui["h10_bpm_spark"]() == ""
+    assert registry.ui["h10_rr_avg_spark"]() == ""
+    assert registry.ui["h10_rr_last_spark"]() == ""
+    assert registry.ui["h10_rr_count_spark"]() == ""
+
+
 def test_pulse_invalid_device_clears_chart_and_resets_state(monkeypatch) -> None:
     module, registry = _load_render_module(
         monkeypatch,
@@ -317,6 +409,44 @@ def test_sen66_invalid_device_clears_chart_sets_annotation_and_resets_state(monk
     )
 
     registry.effects["_update_sen66_chart"]()
+
+    assert widget.data == []
+    assert widget.layout.annotations == [module._NO_DATA_ANNOTATION]
+    assert state == {"chart": None, "dev": None, "tpl": None}
+
+
+def test_h10_invalid_device_clears_chart_sets_annotation_and_resets_state(monkeypatch) -> None:
+    module, registry = _load_render_module(
+        monkeypatch,
+        "h10.py",
+        {
+            "H10_DEVICES": {
+                "11": {
+                    "label": "11 (192.168.121.11)",
+                    "stream": "http://h10-11",
+                }
+            },
+            "H10_CHARTS": {
+                "bpm": "Heart Rate (BPM)",
+                "rr": "Average RR Interval (ms)",
+            },
+        },
+    )
+    widget = _FakeFigureWidget()
+    widget.data = ["stale"]
+    widget.layout.annotations = ["old"]
+    state = {"chart": "bpm", "dev": "11", "tpl": "plotly_dark"}
+
+    module.register_h10_renders(
+        _FakeInput(device="99", h10_chart="bpm"),
+        {"11": _FakeValue({"heart_rate_bpm": 72.0})},
+        {"11": deque()},
+        lambda: "plotly_dark",
+        widget,
+        state,
+    )
+
+    registry.effects["_update_h10_chart"]()
 
     assert widget.data == []
     assert widget.layout.annotations == [module._NO_DATA_ANNOTATION]

@@ -27,6 +27,16 @@ def test_sen66_devices_match_checked_in_config() -> None:
     assert config.SEN66_DEFAULT_DEV == "11"
 
 
+def test_h10_devices_match_checked_in_config() -> None:
+    assert config.H10_DEVICES == {
+        "11": {
+            "label": "11 (192.168.121.11)",
+            "stream": "http://192.168.121.11:8003/stream",
+        }
+    }
+    assert config.H10_DEFAULT_DEV == "11"
+
+
 def test_all_devices_and_defaults_match_current_config() -> None:
     assert config.ALL_DEVICES == {
         "10": "10 (192.168.121.10)",
@@ -38,12 +48,13 @@ def test_all_devices_and_defaults_match_current_config() -> None:
 def test_chart_option_mappings_are_stable() -> None:
     assert config.PULSE_CHARTS["net"] == "Download & Upload (KB/s)"
     assert config.SEN66_CHARTS["pm_nc"] == "PM Number Concentration (#/cm³)"
+    assert config.H10_CHARTS["rr"] == "Average RR Interval (ms)"
 
 
 def test_load_raw_config_reads_explicit_path(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        'pi-pulse:\n  "12":\n    stream: http://example/pulse\nsen66:\n  "12":\n    stream: http://example/sen66\n    nc-stream: http://example/sen66/nc\n',
+        'pi-pulse:\n  "12":\n    stream: http://example/pulse\nsen66:\n  "12":\n    stream: http://example/sen66\n    nc-stream: http://example/sen66/nc\nh10:\n  "12":\n    stream: http://example/h10\n',
         encoding="utf-8",
     )
 
@@ -51,6 +62,7 @@ def test_load_raw_config_reads_explicit_path(tmp_path: Path) -> None:
 
     assert loaded["pi-pulse"]["12"]["stream"] == "http://example/pulse"
     assert loaded["sen66"]["12"]["nc-stream"] == "http://example/sen66/nc"
+    assert loaded["h10"]["12"]["stream"] == "http://example/h10"
 
 
 def test_build_settings_shapes_device_maps_and_preserves_current_default_behavior() -> None:
@@ -63,6 +75,7 @@ def test_build_settings_shapes_device_maps_and_preserves_current_default_behavio
                     "nc-stream": "http://example/sen66/nc",
                 }
             },
+            "h10": {"12": {"stream": "http://example/h10"}},
         }
     )
 
@@ -77,5 +90,12 @@ def test_build_settings_shapes_device_maps_and_preserves_current_default_behavio
         }
     }
     assert settings["sen66_default_dev"] == "12"
+    assert settings["h10_devices"] == {
+        "12": {
+            "label": "12 (192.168.121.12)",
+            "stream": "http://example/h10",
+        }
+    }
+    assert settings["h10_default_dev"] == "12"
     assert settings["all_devices"] == {"12": "12 (192.168.121.12)"}
     assert settings["all_devices_default"] == "11"

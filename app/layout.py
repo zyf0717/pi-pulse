@@ -3,7 +3,13 @@ from faicons import icon_svg
 from shiny import ui
 from shinywidgets import output_widget
 
-from app.config import ALL_DEVICES, ALL_DEVICES_DEFAULT, PULSE_CHARTS, SEN66_CHARTS
+from app.config import (
+    ALL_DEVICES,
+    ALL_DEVICES_DEFAULT,
+    H10_CHARTS,
+    PULSE_CHARTS,
+    SEN66_CHARTS,
+)
 
 _INFO_ICON = icon_svg("circle-info", fill="currentColor", height="1em")
 _CARD_ATTRS_CLASS = "metric-card-trigger"
@@ -82,6 +88,13 @@ _SEN66_CARD_SPECS = [
     ("CO₂", "sen66_co2_val", "sen66_co2_spark", "co2", "tooltip_co2"),
     ("VOC Index", "sen66_voc_val", "sen66_voc_spark", "voc_nox", "tooltip_voc"),
     ("NOx Index", "sen66_nox_val", "sen66_nox_spark", "voc_nox", "tooltip_nox"),
+]
+
+_H10_CARD_SPECS = [
+    ("Heart Rate", "h10_bpm_val", "h10_bpm_spark", "bpm"),
+    ("RR Avg", "h10_rr_avg_val", "h10_rr_avg_spark", "rr"),
+    ("RR Last", "h10_rr_last_val", "h10_rr_last_spark", "rr"),
+    ("RR Count", "h10_rr_count_val", "h10_rr_count_spark", "rr"),
 ]
 
 
@@ -178,6 +191,19 @@ def _sen66_cards():
     ]
 
 
+def _h10_cards():
+    return [
+        _metric_card(
+            title,
+            value_output_id,
+            spark_output_id,
+            chart_target="h10_chart",
+            chart_value=chart_value,
+        )
+        for title, value_output_id, spark_output_id, chart_value in _H10_CARD_SPECS
+    ]
+
+
 def _system_panel():
     return ui.nav_panel(
         "System",
@@ -210,6 +236,27 @@ def _sen66_panel():
     )
 
 
+def _h10_panel():
+    return ui.nav_panel(
+        "H10",
+        ui.br(),
+        ui.layout_column_wrap(*_h10_cards(), fill=False),
+        ui.hr(),
+        ui.input_select(
+            "h10_chart",
+            "",
+            H10_CHARTS,
+            selected="bpm",
+        ),
+        output_widget("h10_graph"),
+        ui.hr(),
+        ui.card(
+            ui.card_header("Latest H10 sample"),
+            ui.div(ui.output_text("h10_payload"), class_="p-2 small"),
+        ),
+    )
+
+
 app_ui = ui.page_sidebar(
     ui.sidebar(
         ui.input_select(
@@ -235,6 +282,7 @@ app_ui = ui.page_sidebar(
     ui.navset_tab(
         _system_panel(),
         _sen66_panel(),
+        _h10_panel(),
         selected="SEN66",
     ),
     theme=shinyswatch.theme.darkly,
