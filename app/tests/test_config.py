@@ -50,7 +50,7 @@ def test_chart_option_mappings_are_stable() -> None:
     assert config.PULSE_CHARTS["net"] == "Download & Upload (KB/s)"
     assert config.SEN66_CHARTS["pm_nc"] == "PM Number Concentration (#/cm³)"
     assert config.H10_CHARTS["rr"] == "Last RR Interval (ms)"
-    assert config.H10_CHARTS["ecg"] == "ECG (uV)"
+    assert config.H10_CHARTS["ecg"] == "ECG (µV)"
 
 
 def test_load_raw_config_reads_explicit_path(tmp_path: Path) -> None:
@@ -68,7 +68,9 @@ def test_load_raw_config_reads_explicit_path(tmp_path: Path) -> None:
     assert loaded["h10"]["12"]["ecg-stream"] == "http://example/h10/ecg"
 
 
-def test_build_settings_shapes_device_maps_and_preserves_current_default_behavior() -> None:
+def test_build_settings_shapes_device_maps_and_preserves_current_default_behavior() -> (
+    None
+):
     settings = config.build_settings(
         {
             "pi-pulse": {"12": {"stream": "http://example/pulse"}},

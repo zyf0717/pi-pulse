@@ -1,9 +1,8 @@
-from collections import deque
 import importlib.util
 import sys
+from collections import deque
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 
@@ -186,7 +185,9 @@ def _load_render_module(monkeypatch, filename: str, config_attrs: dict):
 
     module_name = f"app.renders.{Path(filename).stem}_under_test"
     sys.modules.pop(module_name, None)
-    spec = importlib.util.spec_from_file_location(module_name, APP_ROOT / "renders" / filename)
+    spec = importlib.util.spec_from_file_location(
+        module_name, APP_ROOT / "renders" / filename
+    )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -210,7 +211,17 @@ def test_sen66_value_boxes_format_current_snapshot(monkeypatch) -> None:
     input_obj = _FakeInput(device="11")
     module.register_sen66_renders(
         input_obj,
-        {"11": _FakeValue({"temperature_c": 22.34, "humidity_rh": 45.67, "co2_ppm": 520, "voc_index": 35.2, "nox_index": 1.0})},
+        {
+            "11": _FakeValue(
+                {
+                    "temperature_c": 22.34,
+                    "humidity_rh": 45.67,
+                    "co2_ppm": 520,
+                    "voc_index": 35.2,
+                    "nox_index": 1.0,
+                }
+            )
+        },
         {"11": _FakeValue({"nc_pm0_5_pcm3": 1.0})},
         {"11": deque()},
         {"11": deque()},
@@ -279,7 +290,7 @@ def test_h10_value_boxes_format_current_snapshot(monkeypatch) -> None:
             "H10_CHARTS": {
                 "bpm": "Heart Rate (BPM)",
                 "rr": "Last RR Interval (ms)",
-                "ecg": "ECG (uV)",
+                "ecg": "ECG (µV)",
             },
         },
     )
@@ -308,7 +319,7 @@ def test_h10_value_boxes_format_current_snapshot(monkeypatch) -> None:
     assert registry.text["h10_bpm_val"]() == "72 bpm"
     assert registry.text["h10_rr_last_val"]() == "840 ms"
     assert registry.text["h10_ecg_val"]() == "130 Hz"
-    assert registry.ui["h10_ecg_spark"]() == "SPARK:[1, 2, 3]"
+    assert registry.ui["h10_ecg_spark"]() == "SPARK:['1 µV', '2 µV', '3 µV']"
 
 
 def test_h10_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> None:
@@ -326,7 +337,7 @@ def test_h10_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> None
             "H10_CHARTS": {
                 "bpm": "Heart Rate (BPM)",
                 "rr": "Last RR Interval (ms)",
-                "ecg": "ECG (uV)",
+                "ecg": "ECG (µV)",
             },
         },
     )
@@ -355,7 +366,9 @@ def test_pulse_invalid_device_clears_chart_and_resets_state(monkeypatch) -> None
         monkeypatch,
         "pulse.py",
         {
-            "DEVICES": {"10": {"label": "10 (192.168.121.10)", "url": "http://pulse-10"}},
+            "DEVICES": {
+                "10": {"label": "10 (192.168.121.10)", "url": "http://pulse-10"}
+            },
             "PULSE_CHARTS": {
                 "cpu": "CPU Usage (%)",
                 "cpu_freq": "CPU Frequency (MHz)",
@@ -384,7 +397,9 @@ def test_pulse_invalid_device_clears_chart_and_resets_state(monkeypatch) -> None
     assert state == {"chart": None, "dev": None, "tpl": None}
 
 
-def test_sen66_invalid_device_clears_chart_sets_annotation_and_resets_state(monkeypatch) -> None:
+def test_sen66_invalid_device_clears_chart_sets_annotation_and_resets_state(
+    monkeypatch,
+) -> None:
     module, registry = _load_render_module(
         monkeypatch,
         "sen66.py",
@@ -421,7 +436,9 @@ def test_sen66_invalid_device_clears_chart_sets_annotation_and_resets_state(monk
     assert state == {"chart": None, "dev": None, "tpl": None}
 
 
-def test_h10_invalid_device_clears_chart_sets_annotation_and_resets_state(monkeypatch) -> None:
+def test_h10_invalid_device_clears_chart_sets_annotation_and_resets_state(
+    monkeypatch,
+) -> None:
     module, registry = _load_render_module(
         monkeypatch,
         "h10.py",
@@ -436,7 +453,7 @@ def test_h10_invalid_device_clears_chart_sets_annotation_and_resets_state(monkey
             "H10_CHARTS": {
                 "bpm": "Heart Rate (BPM)",
                 "rr": "Last RR Interval (ms)",
-                "ecg": "ECG (uV)",
+                "ecg": "ECG (µV)",
             },
         },
     )
@@ -478,7 +495,7 @@ def test_h10_ecg_chart_updates_shared_widget(monkeypatch) -> None:
             "H10_CHARTS": {
                 "bpm": "Heart Rate (BPM)",
                 "rr": "Last RR Interval (ms)",
-                "ecg": "ECG (uV)",
+                "ecg": "ECG (µV)",
             },
         },
     )
@@ -499,8 +516,8 @@ def test_h10_ecg_chart_updates_shared_widget(monkeypatch) -> None:
 
     assert len(widget.data) == 1
     assert widget.data[0].y == [10, 20, 30]
-    assert widget.data[0].name == "ECG (uV)"
-    assert widget.layout.yaxis["range"] == [-1300, 1800]
+    assert widget.data[0].name == "ECG (µV)"
+    assert widget.layout.yaxis["range"] == [-1500, 2000]
     assert widget.layout.yaxis["fixedrange"] is True
 
 
@@ -509,7 +526,9 @@ def test_pulse_empty_history_leaves_existing_chart_unchanged(monkeypatch) -> Non
         monkeypatch,
         "pulse.py",
         {
-            "DEVICES": {"10": {"label": "10 (192.168.121.10)", "url": "http://pulse-10"}},
+            "DEVICES": {
+                "10": {"label": "10 (192.168.121.10)", "url": "http://pulse-10"}
+            },
             "PULSE_CHARTS": {
                 "cpu": "CPU Usage (%)",
                 "cpu_freq": "CPU Frequency (MHz)",

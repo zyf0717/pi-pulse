@@ -92,12 +92,19 @@ _SEN66_CARD_SPECS = [
 
 _H10_CARD_SPECS = [
     ("Heart Rate", "h10_bpm_val", "h10_bpm_spark", "bpm"),
-    ("RR Last", "h10_rr_last_val", "h10_rr_last_spark", "rr"),
+    ("RR Interval", "h10_rr_last_val", "h10_rr_last_spark", "rr"),
     ("ECG", "h10_ecg_val", "h10_ecg_spark", "ecg"),
 ]
 
 
-def _metric_card(header_content, value_output_id: str, spark_output_id: str, *, chart_target: str, chart_value: str):
+def _metric_card(
+    header_content,
+    value_output_id: str,
+    spark_output_id: str,
+    *,
+    chart_target: str,
+    chart_value: str,
+):
     return ui.div(
         ui.card(
             ui.card_header(header_content),

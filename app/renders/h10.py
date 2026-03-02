@@ -63,7 +63,7 @@ def _apply_h10_layout(h10_widget: go.FigureWidget, chart: str, tpl: str) -> None
         h10_widget.layout.xaxis = {}
     else:
         h10_widget.layout.yaxis = dict(
-            title="uV",
+            title="µV",
             range=list(_ECG_Y_RANGE),
             fixedrange=True,
         )
@@ -203,7 +203,7 @@ def register_h10_renders(
         samples = list(h10_ecg_samples[dev])
         if not samples:
             return ui.HTML("")
-        return sparkline(samples)
+        return sparkline(samples, fmt=lambda v: f"{v:.0f} µV")
 
     @reactive.Effect
     def _update_h10_chart():

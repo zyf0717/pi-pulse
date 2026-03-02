@@ -3,7 +3,6 @@ import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
-
 APP_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -44,7 +43,11 @@ def _load_layout_module(monkeypatch):
     fake_shinyswatch.theme = SimpleNamespace(darkly="darkly")
 
     fake_faicons = ModuleType("faicons")
-    fake_faicons.icon_svg = lambda *args, **kwargs: {"tag": "icon_svg", "args": args, "kwargs": kwargs}
+    fake_faicons.icon_svg = lambda *args, **kwargs: {
+        "tag": "icon_svg",
+        "args": args,
+        "kwargs": kwargs,
+    }
 
     fake_shinywidgets = ModuleType("shinywidgets")
     fake_shinywidgets.output_widget = _tag_factory("output_widget")
@@ -71,7 +74,7 @@ def _load_layout_module(monkeypatch):
     fake_config.H10_CHARTS = {
         "bpm": "Heart Rate (BPM)",
         "rr": "Last RR Interval (ms)",
-        "ecg": "ECG (uV)",
+        "ecg": "ECG (µV)",
     }
 
     monkeypatch.setitem(sys.modules, "shiny", fake_shiny)
@@ -115,7 +118,9 @@ def test_pulse_cards_match_chart_mapping(monkeypatch) -> None:
     cards = module._pulse_cards()
 
     assert len(cards) == 6
-    assert [card["kwargs"]["data-chart-target"] for card in cards] == ["pulse_chart"] * 6
+    assert [card["kwargs"]["data-chart-target"] for card in cards] == [
+        "pulse_chart"
+    ] * 6
     assert [card["kwargs"]["data-chart-value"] for card in cards] == [
         "cpu",
         "cpu_freq",
@@ -132,7 +137,9 @@ def test_sen66_cards_match_chart_mapping(monkeypatch) -> None:
     cards = module._sen66_cards()
 
     assert len(cards) == 5
-    assert [card["kwargs"]["data-chart-target"] for card in cards] == ["sen66_chart"] * 5
+    assert [card["kwargs"]["data-chart-target"] for card in cards] == [
+        "sen66_chart"
+    ] * 5
     assert [card["kwargs"]["data-chart-value"] for card in cards] == [
         "temp_hum",
         "temp_hum",
@@ -161,4 +168,6 @@ def test_card_click_script_updates_existing_selects(monkeypatch) -> None:
 
     assert ".metric-card-trigger" in module._CARD_CLICK_JS
     assert 'getAttribute("data-chart-target")' in module._CARD_CLICK_JS
-    assert 'dispatchEvent(new Event("change", { bubbles: true }))' in module._CARD_CLICK_JS
+    assert (
+        'dispatchEvent(new Event("change", { bubbles: true }))' in module._CARD_CLICK_JS
+    )

@@ -85,5 +85,5 @@ SEN66_CHARTS = {
 H10_CHARTS = {
     "bpm": "Heart Rate (BPM)",
     "rr": "Last RR Interval (ms)",
-    "ecg": "ECG (uV)",
+    "ecg": "ECG (µV)",
 }
