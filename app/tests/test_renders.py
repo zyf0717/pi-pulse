@@ -100,6 +100,7 @@ class _FakeFigureWidget:
             margin=None,
             yaxis=SimpleNamespace(title=None),
             yaxis2=SimpleNamespace(title=None),
+            xaxis=SimpleNamespace(title=None),
             legend=None,
             autosize=None if layout is None else layout.get("autosize"),
         )
@@ -263,7 +264,7 @@ def test_sen66_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> No
     assert registry.ui["sen66_nox_spark"]() == ""
 
 
-def test_h10_value_boxes_and_payload_format_current_snapshot(monkeypatch) -> None:
+def test_h10_value_boxes_format_current_snapshot(monkeypatch) -> None:
     module, registry = _load_render_module(
         monkeypatch,
         "h10.py",
@@ -272,11 +273,13 @@ def test_h10_value_boxes_and_payload_format_current_snapshot(monkeypatch) -> Non
                 "11": {
                     "label": "11 (192.168.121.11)",
                     "stream": "http://h10-11",
+                    "ecg_stream": "http://h10-11/ecg",
                 }
             },
             "H10_CHARTS": {
                 "bpm": "Heart Rate (BPM)",
-                "rr": "Average RR Interval (ms)",
+                "rr": "Last RR Interval (ms)",
+                "ecg": "ECG (uV)",
             },
         },
     )
@@ -295,16 +298,17 @@ def test_h10_value_boxes_and_payload_format_current_snapshot(monkeypatch) -> Non
             )
         },
         {"11": deque()},
+        {"11": _FakeValue({"samples_uv": [1, 2, 3], "sample_rate_hz": 130})},
+        {"11": deque([1, 2, 3])},
         lambda: "plotly_dark",
         _FakeFigureWidget(),
         {"chart": None, "dev": None, "tpl": None},
     )
 
     assert registry.text["h10_bpm_val"]() == "72 bpm"
-    assert registry.text["h10_rr_avg_val"]() == "832 ms"
     assert registry.text["h10_rr_last_val"]() == "840 ms"
-    assert registry.text["h10_rr_count_val"]() == "2"
-    assert '"heart_rate_bpm": 72.0' in registry.text["h10_payload"]()
+    assert registry.text["h10_ecg_val"]() == "130 Hz"
+    assert registry.ui["h10_ecg_spark"]() == "SPARK:[1, 2, 3]"
 
 
 def test_h10_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> None:
@@ -316,32 +320,34 @@ def test_h10_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> None
                 "11": {
                     "label": "11 (192.168.121.11)",
                     "stream": "http://h10-11",
+                    "ecg_stream": "http://h10-11/ecg",
                 }
             },
             "H10_CHARTS": {
                 "bpm": "Heart Rate (BPM)",
-                "rr": "Average RR Interval (ms)",
+                "rr": "Last RR Interval (ms)",
+                "ecg": "ECG (uV)",
             },
         },
     )
     input_obj = _FakeInput(device="99")
     module.register_h10_renders(
         input_obj,
-        {"11": _FakeValue({"heart_rate_bpm": 72.0, "rr_avg_ms": 832.0})},
+        {"11": _FakeValue({"heart_rate_bpm": 72.0, "rr_last_ms": 840.0})},
         {"11": deque()},
+        {"11": _FakeValue({"samples_uv": [1, 2, 3], "sample_rate_hz": 130})},
+        {"11": deque([1, 2, 3])},
         lambda: "plotly_dark",
         _FakeFigureWidget(),
         {"chart": None, "dev": None, "tpl": None},
     )
 
     assert registry.text["h10_bpm_val"]() == "N/A"
-    assert registry.text["h10_rr_avg_val"]() == "N/A"
     assert registry.text["h10_rr_last_val"]() == "N/A"
-    assert registry.text["h10_rr_count_val"]() == "N/A"
+    assert registry.text["h10_ecg_val"]() == "N/A"
     assert registry.ui["h10_bpm_spark"]() == ""
-    assert registry.ui["h10_rr_avg_spark"]() == ""
     assert registry.ui["h10_rr_last_spark"]() == ""
-    assert registry.ui["h10_rr_count_spark"]() == ""
+    assert registry.ui["h10_ecg_spark"]() == ""
 
 
 def test_pulse_invalid_device_clears_chart_and_resets_state(monkeypatch) -> None:
@@ -424,11 +430,13 @@ def test_h10_invalid_device_clears_chart_sets_annotation_and_resets_state(monkey
                 "11": {
                     "label": "11 (192.168.121.11)",
                     "stream": "http://h10-11",
+                    "ecg_stream": "http://h10-11/ecg",
                 }
             },
             "H10_CHARTS": {
                 "bpm": "Heart Rate (BPM)",
-                "rr": "Average RR Interval (ms)",
+                "rr": "Last RR Interval (ms)",
+                "ecg": "ECG (uV)",
             },
         },
     )
@@ -441,6 +449,8 @@ def test_h10_invalid_device_clears_chart_sets_annotation_and_resets_state(monkey
         _FakeInput(device="99", h10_chart="bpm"),
         {"11": _FakeValue({"heart_rate_bpm": 72.0})},
         {"11": deque()},
+        {"11": _FakeValue({"samples_uv": [1, 2, 3], "sample_rate_hz": 130})},
+        {"11": deque([1, 2, 3])},
         lambda: "plotly_dark",
         widget,
         state,
@@ -451,6 +461,47 @@ def test_h10_invalid_device_clears_chart_sets_annotation_and_resets_state(monkey
     assert widget.data == []
     assert widget.layout.annotations == [module._NO_DATA_ANNOTATION]
     assert state == {"chart": None, "dev": None, "tpl": None}
+
+
+def test_h10_ecg_chart_updates_shared_widget(monkeypatch) -> None:
+    module, registry = _load_render_module(
+        monkeypatch,
+        "h10.py",
+        {
+            "H10_DEVICES": {
+                "11": {
+                    "label": "11 (192.168.121.11)",
+                    "stream": "http://h10-11",
+                    "ecg_stream": "http://h10-11/ecg",
+                }
+            },
+            "H10_CHARTS": {
+                "bpm": "Heart Rate (BPM)",
+                "rr": "Last RR Interval (ms)",
+                "ecg": "ECG (uV)",
+            },
+        },
+    )
+    widget = _FakeFigureWidget()
+
+    module.register_h10_renders(
+        _FakeInput(device="11", h10_chart="ecg"),
+        {"11": _FakeValue({"heart_rate_bpm": 72.0, "rr_last_ms": 840.0})},
+        {"11": deque()},
+        {"11": _FakeValue({"samples_uv": [10, 20, 30], "sample_rate_hz": 130})},
+        {"11": deque([10, 20, 30])},
+        lambda: "plotly_dark",
+        widget,
+        {"chart": None, "dev": None, "tpl": None},
+    )
+
+    registry.effects["_update_h10_chart"]()
+
+    assert len(widget.data) == 1
+    assert widget.data[0].y == [10, 20, 30]
+    assert widget.data[0].name == "ECG (uV)"
+    assert widget.layout.yaxis["range"] == [-1300, 1800]
+    assert widget.layout.yaxis["fixedrange"] is True
 
 
 def test_pulse_empty_history_leaves_existing_chart_unchanged(monkeypatch) -> None:

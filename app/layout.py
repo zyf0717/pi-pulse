@@ -92,9 +92,8 @@ _SEN66_CARD_SPECS = [
 
 _H10_CARD_SPECS = [
     ("Heart Rate", "h10_bpm_val", "h10_bpm_spark", "bpm"),
-    ("RR Avg", "h10_rr_avg_val", "h10_rr_avg_spark", "rr"),
     ("RR Last", "h10_rr_last_val", "h10_rr_last_spark", "rr"),
-    ("RR Count", "h10_rr_count_val", "h10_rr_count_spark", "rr"),
+    ("ECG", "h10_ecg_val", "h10_ecg_spark", "ecg"),
 ]
 
 
@@ -249,11 +248,6 @@ def _h10_panel():
             selected="bpm",
         ),
         output_widget("h10_graph"),
-        ui.hr(),
-        ui.card(
-            ui.card_header("Latest H10 sample"),
-            ui.div(ui.output_text("h10_payload"), class_="p-2 small"),
-        ),
     )
 
 

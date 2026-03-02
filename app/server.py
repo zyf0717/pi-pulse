@@ -1,4 +1,5 @@
 import asyncio
+import time
 from collections import deque
 from datetime import datetime
 
@@ -67,8 +68,29 @@ def _normalize_h10_sample(data: dict) -> dict:
     return sample
 
 
+def _normalize_h10_ecg_chunk(data: dict) -> dict:
+    sample_rate = data.get("sample_rate_hz", 130)
+    if not isinstance(sample_rate, int) or isinstance(sample_rate, bool) or sample_rate <= 0:
+        sample_rate = 130
+
+    samples = data.get("samples_uv", [])
+    if not isinstance(samples, list):
+        samples = []
+
+    return {
+        "samples_uv": [
+            int(sample)
+            for sample in samples
+            if isinstance(sample, (int, float)) and not isinstance(sample, bool)
+        ],
+        "sample_rate_hz": sample_rate,
+    }
+
+
 def server(input, output, session):
     shinyswatch.theme_picker_server()
+    _h10_ecg_frame_s = 1 / 30
+    _h10_ecg_buffer_s = 0.5
 
     # ── Plotly template (tracks chart_style input) ────────────────────────────
     @reactive.calc
@@ -129,6 +151,18 @@ def server(input, output, session):
         k: reactive.Value(dict(_h10_default)) for k in H10_DEVICES
     }
     h10_history: dict[str, deque] = {k: deque(maxlen=60) for k in H10_DEVICES}
+    _h10_ecg_default = {
+        "samples_uv": [],
+        "sample_rate_hz": 130,
+    }
+    h10_ecg_latest: dict[str, reactive.Value] = {
+        k: reactive.Value(dict(_h10_ecg_default)) for k in H10_DEVICES
+    }
+    h10_ecg_samples: dict[str, deque] = {k: deque(maxlen=1300) for k in H10_DEVICES}
+    h10_ecg_pending: dict[str, deque] = {k: deque() for k in H10_DEVICES}
+    h10_ecg_sample_rate: dict[str, int] = {k: 130 for k in H10_DEVICES}
+    h10_ecg_buffer_until: dict[str, float | None] = {k: None for k in H10_DEVICES}
+    h10_ecg_fractional: dict[str, float] = {k: 0.0 for k in H10_DEVICES}
 
     # ── SSE callbacks ─────────────────────────────────────────────────────────
     async def on_pulse(key: str, data: dict):
@@ -147,6 +181,57 @@ def server(input, output, session):
         normalized = _normalize_h10_sample(data)
         h10_history[key].append((datetime.now(), normalized))
         h10_latest[key].set(normalized)
+
+    async def on_h10_ecg(key: str, data: dict):
+        normalized = _normalize_h10_ecg_chunk(data)
+        was_idle = not h10_ecg_pending[key]
+        h10_ecg_pending[key].extend(normalized["samples_uv"])
+        h10_ecg_sample_rate[key] = normalized["sample_rate_hz"]
+        if was_idle:
+            h10_ecg_buffer_until[key] = time.monotonic() + _h10_ecg_buffer_s
+            h10_ecg_fractional[key] = 0.0
+
+    async def pump_h10_ecg(key: str):
+        last_tick = time.monotonic()
+        try:
+            while True:
+                await asyncio.sleep(_h10_ecg_frame_s)
+                now = time.monotonic()
+                dt = now - last_tick
+                last_tick = now
+
+                if not h10_ecg_pending[key]:
+                    h10_ecg_fractional[key] = 0.0
+                    continue
+
+                buffer_until = h10_ecg_buffer_until[key]
+                if buffer_until is not None:
+                    if now < buffer_until:
+                        continue
+                    h10_ecg_buffer_until[key] = None
+
+                h10_ecg_fractional[key] += dt * h10_ecg_sample_rate[key]
+                samples_to_release = int(h10_ecg_fractional[key])
+                if samples_to_release <= 0:
+                    continue
+
+                h10_ecg_fractional[key] -= samples_to_release
+                released: list[int] = []
+                while h10_ecg_pending[key] and len(released) < samples_to_release:
+                    released.append(h10_ecg_pending[key].popleft())
+                if not released:
+                    continue
+
+                h10_ecg_samples[key].extend(released)
+                frame = {
+                    "samples_uv": list(h10_ecg_samples[key]),
+                    "sample_rate_hz": h10_ecg_sample_rate[key],
+                }
+                async with reactive.lock():
+                    h10_ecg_latest[key].set(frame)
+                    await reactive.flush()
+        except asyncio.CancelledError:
+            return
 
     # ── Start all streams at session open ─────────────────────────────────────
     tasks = (
@@ -178,6 +263,18 @@ def server(input, output, session):
             )
             for k, v in H10_DEVICES.items()
         ]
+        + [
+            asyncio.create_task(
+                stream_consumer(
+                    f"h10-ecg-{k}",
+                    v["ecg_stream"],
+                    lambda d, k=k: on_h10_ecg(k, d),
+                )
+            )
+            for k, v in H10_DEVICES.items()
+            if v.get("ecg_stream")
+        ]
+        + [asyncio.create_task(pump_h10_ecg(k)) for k in H10_DEVICES]
     )
     session.on_ended(lambda: [t.cancel() for t in tasks])
 
@@ -204,5 +301,12 @@ def server(input, output, session):
     h10_widget = go.FigureWidget(layout=dict(autosize=True, height=400))
     h10_state: dict = {"chart": None, "dev": None, "tpl": None}
     register_h10_renders(
-        input, h10_latest, h10_history, plotly_tpl, h10_widget, h10_state
+        input,
+        h10_latest,
+        h10_history,
+        h10_ecg_latest,
+        h10_ecg_samples,
+        plotly_tpl,
+        h10_widget,
+        h10_state,
     )

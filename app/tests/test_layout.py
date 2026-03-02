@@ -70,7 +70,8 @@ def _load_layout_module(monkeypatch):
     }
     fake_config.H10_CHARTS = {
         "bpm": "Heart Rate (BPM)",
-        "rr": "Average RR Interval (ms)",
+        "rr": "Last RR Interval (ms)",
+        "ecg": "ECG (uV)",
     }
 
     monkeypatch.setitem(sys.modules, "shiny", fake_shiny)
@@ -146,13 +147,12 @@ def test_h10_cards_match_chart_mapping(monkeypatch) -> None:
 
     cards = module._h10_cards()
 
-    assert len(cards) == 4
-    assert [card["kwargs"]["data-chart-target"] for card in cards] == ["h10_chart"] * 4
+    assert len(cards) == 3
+    assert [card["kwargs"]["data-chart-target"] for card in cards] == ["h10_chart"] * 3
     assert [card["kwargs"]["data-chart-value"] for card in cards] == [
         "bpm",
         "rr",
-        "rr",
-        "rr",
+        "ecg",
     ]
 
 

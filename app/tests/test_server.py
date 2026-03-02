@@ -45,6 +45,7 @@ def _load_server_module(monkeypatch):
         "11": {
             "label": "11 (192.168.121.11)",
             "stream": "http://h10-11",
+            "ecg_stream": "http://h10-11/ecg",
         }
     }
 
@@ -140,6 +141,8 @@ def _load_server_module(monkeypatch):
     spec.loader.exec_module(module)
 
     def create_task(payload):
+        if hasattr(payload, "close"):
+            payload.close()
         task = _FakeTask(payload)
         calls["create_task"].append(task)
         return task
@@ -169,20 +172,22 @@ def test_server_wires_stream_tasks_and_registers_renders(monkeypatch) -> None:
     server_module.server(_FakeInput(), output=None, session=session)
 
     assert calls["theme_picker_server"] == 1
-    assert len(calls["stream_consumer"]) == 4
+    assert len(calls["stream_consumer"]) == 5
     assert [call["label"] for call in calls["stream_consumer"]] == [
         "pulse-10",
         "sen66-11",
         "sen66-nc-11",
         "h10-11",
+        "h10-ecg-11",
     ]
     assert [call["url"] for call in calls["stream_consumer"]] == [
         "http://pulse-10",
         "http://sen66-11",
         "http://sen66-11/nc",
         "http://h10-11",
+        "http://h10-11/ecg",
     ]
-    assert len(calls["create_task"]) == 4
+    assert len(calls["create_task"]) == 6
     assert len(calls["pulse_register"]) == 1
     assert len(calls["sen66_register"]) == 1
     assert len(calls["h10_register"]) == 1
@@ -198,7 +203,7 @@ def test_server_registers_session_cleanup_that_cancels_all_tasks(monkeypatch) ->
 
     session.ended_callback()
 
-    assert [task.cancel_calls for task in calls["create_task"]] == [1, 1, 1, 1]
+    assert [task.cancel_calls for task in calls["create_task"]] == [1, 1, 1, 1, 1, 1]
 
 
 def test_server_initializes_chart_state_for_render_registration(monkeypatch) -> None:
@@ -215,8 +220,8 @@ def test_server_initializes_chart_state_for_render_registration(monkeypatch) -> 
     assert pulse_args[5] == {"chart": None, "dev": None, "tpl": None}
     assert isinstance(sen66_args[6], _FakeFigureWidget)
     assert sen66_args[7] == {"chart": None, "dev": None, "tpl": None}
-    assert isinstance(h10_args[4], _FakeFigureWidget)
-    assert h10_args[5] == {"chart": None, "dev": None, "tpl": None}
+    assert isinstance(h10_args[6], _FakeFigureWidget)
+    assert h10_args[7] == {"chart": None, "dev": None, "tpl": None}
     assert pulse_args[0].chart_style() == "plotly_dark"
     assert sen66_args[0].chart_style() == "plotly_dark"
     assert h10_args[0].chart_style() == "plotly_dark"
@@ -235,3 +240,16 @@ def test_normalize_h10_sample_handles_common_ble_field_names(monkeypatch) -> Non
     assert normalized["rr_avg_ms"] == 832.0
     assert normalized["rr_count"] == 2
     assert normalized["battery_pct"] == 95
+
+
+def test_normalize_h10_ecg_chunk_filters_samples_and_defaults_rate(monkeypatch) -> None:
+    server_module, _ = _load_server_module(monkeypatch)
+
+    normalized = server_module._normalize_h10_ecg_chunk(
+        {"samples_uv": [10, 11.9, "bad", True, -5], "sample_rate_hz": 0}
+    )
+
+    assert normalized == {
+        "samples_uv": [10, 11, -5],
+        "sample_rate_hz": 130,
+    }
