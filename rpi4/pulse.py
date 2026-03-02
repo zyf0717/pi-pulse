@@ -1,11 +1,14 @@
 import asyncio
-import json
 import time
 from typing import Any, Dict, Optional, Tuple
 
 import psutil
 from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
+
+try:
+    from sse import encode_sse, sse_response
+except ImportError:
+    from rpi4.sse import encode_sse, sse_response
 
 app = FastAPI(title="Pi-Pulse Metrics")
 
@@ -150,7 +153,7 @@ async def metric_stream(sample_period_s: float = 1.0, max_frames: Optional[int] 
     try:
         while max_frames is None or frame < max_frames:
             stats, last_ts, last_net = collect_metrics(last_ts, last_net)
-            yield f"data: {json.dumps(stats)}\n\n"
+            yield encode_sse(stats)
             frame += 1
             # Skip the sleep after the final frame so the generator exits cleanly.
             if max_frames is None or frame < max_frames:
@@ -166,10 +169,4 @@ async def health():
 
 @app.get("/stream")
 async def stream():
-    headers = {
-        "Cache-Control": "no-cache",
-        "X-Accel-Buffering": "no",
-    }
-    return StreamingResponse(
-        metric_stream(), media_type="text/event-stream", headers=headers
-    )
+    return sse_response(metric_stream())

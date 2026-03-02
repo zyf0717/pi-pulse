@@ -1,15 +1,18 @@
 import asyncio
-import json
 from contextlib import asynccontextmanager
 from typing import Dict, Optional
 
 from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
 from sensirion_driver_adapters.i2c_adapter.i2c_channel import I2cChannel
 
 # Official Sensirion hardware imports (modern channel-based API)
 from sensirion_i2c_driver import CrcCalculator, I2cConnection, LinuxI2cTransceiver
 from sensirion_i2c_sen66.device import Sen66Device
+
+try:
+    from sse import encode_sse, sse_response
+except ImportError:
+    from rpi4.sse import encode_sse, sse_response
 
 # Global sensor instance shared across all requests
 sensor = None
@@ -137,7 +140,7 @@ async def environmental_stream(
     frame = 0
     while max_frames is None or frame < max_frames:
         payload = read_environmental(sensor)
-        yield f"data: {json.dumps(payload)}\n\n"
+        yield encode_sse(payload)
         frame += 1
         if max_frames is None or frame < max_frames:
             await asyncio.sleep(sample_period_s)
@@ -159,7 +162,7 @@ async def number_concentration_stream(
     frame = 0
     while max_frames is None or frame < max_frames:
         payload = read_number_concentration(sensor)
-        yield f"data: {json.dumps(payload)}\n\n"
+        yield encode_sse(payload)
         frame += 1
         if max_frames is None or frame < max_frames:
             await asyncio.sleep(sample_period_s)
@@ -168,12 +171,10 @@ async def number_concentration_stream(
 @app.get("/stream")
 async def stream_environmental():
     """SSE stream: temp, RH, CO2, VOC, NOx, PM mass concentrations."""
-    return StreamingResponse(environmental_stream(), media_type="text/event-stream")
+    return sse_response(environmental_stream())
 
 
 @app.get("/nc-stream")
 async def stream_number_concentration():
     """SSE stream: PM number concentrations per cm³ incl. PM0.5."""
-    return StreamingResponse(
-        number_concentration_stream(), media_type="text/event-stream"
-    )
+    return sse_response(number_concentration_stream())

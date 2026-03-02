@@ -324,13 +324,28 @@ def test_parse_ecg_frame_mixed_samples():
 def _build_acc_packet(
     samples_xyz_mg: list[tuple[int, int, int]],
     meas_type: int = 0x02,
-    frame_type_byte: int = 0x00,
+    frame_type_byte: int = 0x01,
 ) -> bytes:
-    """Build a minimal PMD accelerometer packet with 16-bit x/y/z samples."""
+    """Build a minimal PMD accelerometer packet for the requested ACC frame type."""
     header = bytes([meas_type]) + b"\x00" * 8 + bytes([frame_type_byte])
     payload = b""
+    frame_type = frame_type_byte & 0x7F
+
     for x_mg, y_mg, z_mg in samples_xyz_mg:
-        payload += struct.pack("<hhh", x_mg, y_mg, z_mg)
+        if frame_type == 0:
+            payload += struct.pack("<bbb", x_mg, y_mg, z_mg)
+            continue
+        if frame_type == 1:
+            payload += struct.pack("<hhh", x_mg, y_mg, z_mg)
+            continue
+        if frame_type == 2:
+            for axis in (x_mg, y_mg, z_mg):
+                unsigned = axis & 0xFFFFFF
+                payload += bytes(
+                    [unsigned & 0xFF, (unsigned >> 8) & 0xFF, (unsigned >> 16) & 0xFF]
+                )
+            continue
+        raise ValueError(f"unsupported test frame type {frame_type}")
     return header + payload
 
 
@@ -352,6 +367,30 @@ def test_parse_acc_frame_empty_payload_returns_empty_list():
     packet = _build_acc_packet([])
     result = h10.parse_acc_frame(packet)
     assert result == []
+
+
+def test_parse_acc_frame_type0_xyz_samples():
+    """Type 0 ACC packets use signed int8 values per axis."""
+    h10 = _load_h10()
+    samples = [(10, -20, 30), (-40, 50, -60)]
+    packet = _build_acc_packet(samples, frame_type_byte=0x00)
+    result = h10.parse_acc_frame(packet)
+    assert result == [
+        {"x_mg": 10, "y_mg": -20, "z_mg": 30},
+        {"x_mg": -40, "y_mg": 50, "z_mg": -60},
+    ]
+
+
+def test_parse_acc_frame_type2_xyz_samples():
+    """Type 2 ACC packets use signed 24-bit values per axis."""
+    h10 = _load_h10()
+    samples = [(1_000, -2_000, 3_000), (-40_000, 50_000, -60_000)]
+    packet = _build_acc_packet(samples, frame_type_byte=0x02)
+    result = h10.parse_acc_frame(packet)
+    assert result == [
+        {"x_mg": 1_000, "y_mg": -2_000, "z_mg": 3_000},
+        {"x_mg": -40_000, "y_mg": 50_000, "z_mg": -60_000},
+    ]
 
 
 def test_parse_acc_frame_raises_on_short_frame():
@@ -383,12 +422,13 @@ def test_parse_acc_frame_raises_on_compressed_frame():
         h10.parse_acc_frame(packet)
 
 
-def test_parse_acc_frame_raises_on_nonzero_frame_type():
-    """Only uncompressed Type 0 ACC frames are supported."""
+def test_parse_acc_frame_raises_on_unsupported_frame_type():
+    """Unsupported ACC frame types raise ValueError."""
     h10 = _load_h10()
     import pytest
 
-    packet = _build_acc_packet([(1, 2, 3)], frame_type_byte=0x01)
+    header = bytes([h10.PMD_MEAS_TYPE_ACC]) + b"\x00" * 8 + bytes([0x03])
+    packet = header + b"\x01\x02\x03"
     with pytest.raises(ValueError, match="frame type"):
         h10.parse_acc_frame(packet)
 
