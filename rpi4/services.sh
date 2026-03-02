@@ -70,7 +70,8 @@ resolve_context() {
     elif command -v uvicorn &>/dev/null; then
         UVICORN_BIN="$(command -v uvicorn)"
     else
-        die "uvicorn not found — activate the project environment before running this script"
+        die "uvicorn not found — activate the project environment first, then use 'sudo -E' to preserve it:
+       conda activate pi-pulse && sudo -E ./rpi4/services.sh install"
     fi
 
     export SERVICE_USER WORKING_DIR UVICORN_BIN
