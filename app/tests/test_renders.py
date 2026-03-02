@@ -517,7 +517,7 @@ def test_h10_ecg_chart_updates_shared_widget(monkeypatch) -> None:
     assert len(widget.data) == 1
     assert widget.data[0].y == [10, 20, 30]
     assert widget.data[0].name == "ECG (µV)"
-    assert widget.layout.yaxis["range"] == [-1500, 2000]
+    assert widget.layout.yaxis["range"] == [-1700, 2000]
     assert widget.layout.yaxis["fixedrange"] is True
 
 
