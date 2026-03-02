@@ -9,7 +9,13 @@ dependencies:
   - httpx
   - pandas
   - pyyaml
+  - fastapi
+  - psutil
+  - uvicorn
   - pip:
     - shinyswatch
     - faicons
     - shinywidgets
+    - sensirion-driver-adapters
+    - sensirion-i2c-driver
+    - sensirion-i2c-sen66
