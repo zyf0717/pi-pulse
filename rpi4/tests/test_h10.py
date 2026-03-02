@@ -3,6 +3,8 @@
 Covers:
 - parse_hr_measurement  — uint8/uint16 HR format, RR conversion, edge cases
 - hr_stream             — SSE framing verified via max_frames + feeder task
+- parse_ecg_frame       — PMD frame parsing, sign-extension, error paths
+- ecg_stream            — SSE framing verified via max_frames + feeder task
 - FastAPI /health       — route response body
 """
 
@@ -209,6 +211,179 @@ def test_hr_stream_subscriber_cleaned_up_after_exit():
     h10 = _load_h10()
     asyncio.run(_collect_hr_frames(h10, n=1))
     assert len(h10._subscribers) == 0
+
+
+# ── parse_ecg_frame ───────────────────────────────────────────────────────────
+# Pure synchronous function — no async infrastructure needed.
+
+
+def _build_ecg_packet(
+    samples_uv: list[int], meas_type: int = 0x00, frame_type_byte: int = 0x00
+) -> bytes:
+    """
+    Build a minimal PMD Data notification packet.
+
+    Header (10 bytes):
+      byte 0    : measurement type
+      bytes 1-8 : timestamp (zeroed)
+      byte 9    : frame_type_byte (bit 7 = compressed, bits 0-6 = frame type)
+    Payload:
+      3 bytes per sample, signed 24-bit little-endian
+    """
+    header = bytes([meas_type]) + b"\x00" * 8 + bytes([frame_type_byte])
+    payload = b""
+    for uv in samples_uv:
+        # Convert Python int to unsigned 24-bit for packing
+        unsigned = uv & 0xFFFFFF
+        payload += bytes(
+            [unsigned & 0xFF, (unsigned >> 8) & 0xFF, (unsigned >> 16) & 0xFF]
+        )
+    return header + payload
+
+
+def test_parse_ecg_frame_positive_samples():
+    """Positive µV values round-trip correctly through the parser."""
+    h10 = _load_h10()
+    samples = [100, 200, 300]
+    packet = _build_ecg_packet(samples)
+    result = h10.parse_ecg_frame(packet)
+    assert result == samples
+
+
+def test_parse_ecg_frame_negative_samples_sign_extended():
+    """Negative µV values are sign-extended correctly from 24-bit."""
+    h10 = _load_h10()
+    samples = [-100, -1, -8388608]  # -8388608 = minimum signed 24-bit value
+    packet = _build_ecg_packet(samples)
+    result = h10.parse_ecg_frame(packet)
+    assert result == samples
+
+
+def test_parse_ecg_frame_empty_payload_returns_empty_list():
+    """Header only (no sample bytes) → empty list, no error."""
+    h10 = _load_h10()
+    packet = _build_ecg_packet([])
+    result = h10.parse_ecg_frame(packet)
+    assert result == []
+
+
+def test_parse_ecg_frame_raises_on_short_frame():
+    """Frames shorter than 10 bytes raise ValueError."""
+    h10 = _load_h10()
+    import pytest
+
+    with pytest.raises(ValueError, match="too short"):
+        h10.parse_ecg_frame(b"\x00" * 9)
+
+
+def test_parse_ecg_frame_raises_on_wrong_measurement_type():
+    """Measurement type ≠ 0x00 (ECG) raises ValueError."""
+    h10 = _load_h10()
+    import pytest
+
+    packet = _build_ecg_packet([100], meas_type=0x05)  # 0x05 = ACC, not ECG
+    with pytest.raises(ValueError, match="ECG"):
+        h10.parse_ecg_frame(packet)
+
+
+def test_parse_ecg_frame_raises_on_compressed_frame():
+    """Bit-7-set frame_type_byte indicates compressed data — unsupported, raises ValueError."""
+    h10 = _load_h10()
+    import pytest
+
+    packet = _build_ecg_packet([100], frame_type_byte=0x80)  # compressed flag
+    with pytest.raises(ValueError, match="[Cc]ompressed"):
+        h10.parse_ecg_frame(packet)
+
+
+def test_parse_ecg_frame_raises_on_nonzero_frame_type():
+    """Non-zero frame type (e.g. Type 1) raises ValueError."""
+    h10 = _load_h10()
+    import pytest
+
+    packet = _build_ecg_packet([100], frame_type_byte=0x01)  # Type 1, not compressed
+    with pytest.raises(ValueError, match="frame type"):
+        h10.parse_ecg_frame(packet)
+
+
+def test_parse_ecg_frame_mixed_samples():
+    """A mix of positive and negative values all parse correctly."""
+    h10 = _load_h10()
+    samples = [0, -500, 1234, -8000, 8000]
+    packet = _build_ecg_packet(samples)
+    result = h10.parse_ecg_frame(packet)
+    assert result == samples
+
+
+# ── ecg_stream — SSE framing ──────────────────────────────────────────────────
+# ecg_stream blocks on Queue.get() waiting for PMD Data notifications.
+# The feeder coroutine simulates those by writing into _ecg_subscribers.
+
+
+async def _collect_ecg_frames(mod, n, payload=None):
+    """
+    Run ecg_stream(max_frames=n) while concurrently feeding it n fake payloads.
+
+    Mirrors _collect_hr_frames; uses _ecg_subscribers instead of _subscribers.
+    """
+    if payload is None:
+        payload = {"samples_uv": [100, -200, 300], "sample_rate_hz": 130}
+
+    async def feeder():
+        for _ in range(n):
+            await asyncio.sleep(0)
+            async with mod._ecg_subscribers_lock:
+                for q in list(mod._ecg_subscribers):
+                    try:
+                        q.put_nowait(payload)
+                    except asyncio.QueueFull:
+                        pass
+
+    feeder_task = asyncio.create_task(feeder())
+    frames = []
+    async for frame in mod.ecg_stream(max_frames=n):
+        frames.append(frame)
+    await feeder_task
+    return frames
+
+
+def test_ecg_stream_single_frame_has_sse_prefix():
+    h10 = _load_h10()
+    frames = asyncio.run(_collect_ecg_frames(h10, n=1))
+    assert len(frames) == 1
+    assert frames[0].startswith("data: ")
+
+
+def test_ecg_stream_single_frame_is_valid_json():
+    h10 = _load_h10()
+    frames = asyncio.run(_collect_ecg_frames(h10, n=1))
+    payload = json.loads(frames[0][len("data: ") :].strip())
+    assert "samples_uv" in payload
+    assert "sample_rate_hz" in payload
+
+
+def test_ecg_stream_terminates_after_max_frames():
+    """Generator must yield exactly N frames then stop."""
+    h10 = _load_h10()
+    frames = asyncio.run(_collect_ecg_frames(h10, n=4))
+    assert len(frames) == 4
+
+
+def test_ecg_stream_frame_contains_correct_payload():
+    """Payload values match the data injected by the feeder."""
+    h10 = _load_h10()
+    expected = {"samples_uv": [-150, 0, 250], "sample_rate_hz": 130}
+    frames = asyncio.run(_collect_ecg_frames(h10, n=1, payload=expected))
+    result = json.loads(frames[0][len("data: ") :].strip())
+    assert result["samples_uv"] == expected["samples_uv"]
+    assert result["sample_rate_hz"] == 130
+
+
+def test_ecg_stream_subscriber_cleaned_up_after_exit():
+    """After the generator exits, its queue is removed from _ecg_subscribers."""
+    h10 = _load_h10()
+    asyncio.run(_collect_ecg_frames(h10, n=1))
+    assert len(h10._ecg_subscribers) == 0
 
 
 # ── FastAPI /health ───────────────────────────────────────────────────────────
