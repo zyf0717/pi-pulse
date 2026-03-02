@@ -1,6 +1,5 @@
-"""H10 (heart-rate monitor) renders: value boxes, sparklines, chart, and payload."""
+"""H10 (heart-rate monitor) renders: value boxes and chart."""
 
-import json
 from collections import deque
 
 import plotly.graph_objects as go
@@ -26,10 +25,8 @@ _NO_DATA_ANNOTATION = dict(
     font=dict(size=14),
 )
 
-_H10_FIELDS = {
-    "bpm": "heart_rate_bpm",
-    "rr": "rr_avg_ms",
-}
+_H10_FIELDS = {"bpm": "heart_rate_bpm", "rr": "rr_last_ms"}
+_ECG_Y_RANGE = [-1500, 2000]
 
 
 def _h10_spark(
@@ -60,8 +57,17 @@ def _apply_h10_layout(h10_widget: go.FigureWidget, chart: str, tpl: str) -> None
     h10_widget.layout.legend = {}
     if chart == "bpm":
         h10_widget.layout.yaxis = dict(title="BPM")
-    else:
+        h10_widget.layout.xaxis = {}
+    elif chart == "rr":
         h10_widget.layout.yaxis = dict(title="ms")
+        h10_widget.layout.xaxis = {}
+    else:
+        h10_widget.layout.yaxis = dict(
+            title="uV",
+            range=list(_ECG_Y_RANGE),
+            fixedrange=True,
+        )
+        h10_widget.layout.xaxis = dict(title="Seconds")
 
 
 def _rebuild_h10_chart(
@@ -73,9 +79,22 @@ def _rebuild_h10_chart(
     times: list,
     data_rows: list[dict],
 ) -> None:
-    field = _H10_FIELDS[chart]
     h10_widget.data = []
     _apply_h10_layout(h10_widget, chart, tpl)
+    if chart == "ecg":
+        sample_rate_hz = int(data_rows[-1].get("sample_rate_hz", 130) or 130)
+        y_data = list(data_rows[-1].get("samples_uv", []))
+        x_data = _ecg_time_axis(len(y_data), sample_rate_hz)
+        h10_widget.add_scatter(
+            x=x_data,
+            y=y_data,
+            mode="lines",
+            name=H10_CHARTS[chart],
+        )
+        h10_state.update({"chart": chart, "dev": dev, "tpl": tpl})
+        return
+
+    field = _H10_FIELDS[chart]
     h10_widget.add_scatter(
         x=times,
         y=[row.get(field, 0.0) for row in data_rows],
@@ -91,15 +110,33 @@ def _update_h10_chart_data(
     times: list,
     data_rows: list[dict],
 ) -> None:
+    if chart == "ecg":
+        sample_rate_hz = int(data_rows[-1].get("sample_rate_hz", 130) or 130)
+        y_data = list(data_rows[-1].get("samples_uv", []))
+        h10_widget.data[0].x = _ecg_time_axis(len(y_data), sample_rate_hz)
+        h10_widget.data[0].y = y_data
+        return
+
     field = _H10_FIELDS[chart]
     h10_widget.data[0].x = times
     h10_widget.data[0].y = [row.get(field, 0.0) for row in data_rows]
+
+
+def _ecg_time_axis(sample_count: int, sample_rate_hz: int) -> list[float]:
+    if sample_count <= 0:
+        return []
+    if sample_rate_hz <= 0:
+        sample_rate_hz = 130
+    end_offset = (sample_count - 1) / sample_rate_hz
+    return [(index / sample_rate_hz) - end_offset for index in range(sample_count)]
 
 
 def register_h10_renders(
     input,
     h10_latest: dict[str, reactive.Value],
     h10_history: dict[str, deque],
+    h10_ecg_latest: dict[str, reactive.Value],
+    h10_ecg_samples: dict[str, deque],
     plotly_tpl,
     h10_widget: go.FigureWidget,
     h10_state: dict,
@@ -117,16 +154,6 @@ def register_h10_renders(
         )
 
     @render.text
-    def h10_rr_avg_val():
-        return metric_value(
-            input.device(),
-            H10_DEVICES,
-            h10_latest,
-            "rr_avg_ms",
-            lambda value: f"{value:.0f} ms",
-        )
-
-    @render.text
     def h10_rr_last_val():
         return metric_value(
             input.device(),
@@ -137,21 +164,15 @@ def register_h10_renders(
         )
 
     @render.text
-    def h10_rr_count_val():
-        return metric_value(
-            input.device(),
-            H10_DEVICES,
-            h10_latest,
-            "rr_count",
-            lambda value: f"{value:.0f}",
-        )
-
-    @render.text
-    def h10_payload():
+    def h10_ecg_val():
         dev = input.device()
         if dev not in H10_DEVICES:
-            return "No H10 device configured for the selected host."
-        return json.dumps(h10_latest[dev](), sort_keys=True, default=str)
+            return "N/A"
+        ecg_chunk = h10_ecg_latest[dev]()
+        if not h10_ecg_samples[dev]:
+            return "N/A"
+        sample_rate_hz = ecg_chunk.get("sample_rate_hz", 130)
+        return f"{sample_rate_hz:.0f} Hz"
 
     @render.ui
     def h10_bpm_spark():
@@ -161,16 +182,6 @@ def register_h10_renders(
             h10_history,
             "heart_rate_bpm",
             fmt=lambda value: f"{value:.0f} bpm",
-        )
-
-    @render.ui
-    def h10_rr_avg_spark():
-        return _h10_spark(
-            input.device(),
-            h10_latest,
-            h10_history,
-            "rr_avg_ms",
-            fmt=lambda value: f"{value:.0f} ms",
         )
 
     @render.ui
@@ -184,18 +195,15 @@ def register_h10_renders(
         )
 
     @render.ui
-    def h10_rr_count_spark():
-        return _h10_spark(
-            input.device(),
-            h10_latest,
-            h10_history,
-            "rr_count",
-            fmt=lambda value: f"{value:.0f}",
-        )
-
-    @render_widget
-    def h10_graph():
-        return h10_widget
+    def h10_ecg_spark():
+        dev = input.device()
+        if dev not in H10_DEVICES:
+            return ui.HTML("")
+        h10_ecg_latest[dev]()  # establish reactive dependency
+        samples = list(h10_ecg_samples[dev])
+        if not samples:
+            return ui.HTML("")
+        return sparkline(samples)
 
     @reactive.Effect
     def _update_h10_chart():
@@ -207,8 +215,24 @@ def register_h10_renders(
             _reset_h10_chart(h10_widget, h10_state)
             return
 
-        h10_latest[dev]()
-        history = list(h10_history[dev])
+        if chart == "ecg":
+            ecg_chunk = h10_ecg_latest[dev]()
+            samples = list(h10_ecg_samples[dev])
+            if not samples:
+                _reset_h10_chart(h10_widget, h10_state)
+                return
+            history = [
+                (
+                    None,
+                    {
+                        "samples_uv": samples,
+                        "sample_rate_hz": ecg_chunk.get("sample_rate_hz", 130),
+                    },
+                )
+            ]
+        else:
+            h10_latest[dev]()
+            history = list(h10_history[dev])
         if not history:
             return
 
@@ -222,3 +246,7 @@ def register_h10_renders(
                 )
             else:
                 _update_h10_chart_data(h10_widget, chart, times, data_rows)
+
+    @render_widget
+    def h10_graph():
+        return h10_widget

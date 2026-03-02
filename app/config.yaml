@@ -12,3 +12,4 @@ sen66:
 h10:
   "11":
     stream: http://192.168.121.11:8003/stream
+    ecg-stream: http://192.168.121.11:8003/ecg-stream

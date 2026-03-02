@@ -37,6 +37,7 @@ def build_settings(raw_config: Mapping[str, Mapping[str, Mapping[str, str]]]) ->
         key: {
             "label": _device_label(key),
             "stream": value["stream"],
+            "ecg_stream": value.get("ecg-stream"),
         }
         for key, value in h10_config.items()
     }
@@ -83,5 +84,6 @@ SEN66_CHARTS = {
 
 H10_CHARTS = {
     "bpm": "Heart Rate (BPM)",
-    "rr": "Average RR Interval (ms)",
+    "rr": "Last RR Interval (ms)",
+    "ecg": "ECG (uV)",
 }
