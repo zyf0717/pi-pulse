@@ -43,7 +43,7 @@ die()  { echo "ERROR: $*" >&2; exit 1; }
 info() { echo "==> $*"; }
 
 must_root() {
-    [[ $EUID -eq 0 ]] || die "this command requires root — run with sudo"
+    [[ $EUID -eq 0 ]] || die "this command requires root; run with sudo E"
 }
 
 # Detect the three variables used in the service file templates.

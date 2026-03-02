@@ -16,6 +16,7 @@ dependencies:
     - shinyswatch
     - faicons
     - shinywidgets
+    - bleak
     - sensirion-driver-adapters
     - sensirion-i2c-driver
     - sensirion-i2c-sen66
