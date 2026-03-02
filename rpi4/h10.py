@@ -35,7 +35,7 @@ Polar's H10 product documentation states the SDK also exposes accelerometer data
 with sample rates 25/50/100/200 Hz, ranges 2G/4G/8G, and axis values in mG.
 This implementation starts ACC at 200 Hz, 16-bit resolution, 8G range.
 
-Only uncompressed Type 0 frames are handled here.
+ACC frames: uncompressed Type 0 (int8/axis), Type 1 (int16/axis), Type 2 (int24/axis).
 """
 
 import asyncio
@@ -54,8 +54,7 @@ H10_ADDRESS = "AA:BB:CC:DD:EE:01"
 # Standard Bluetooth Heart Rate Measurement characteristic
 HR_MEASUREMENT_UUID = "00002a37-0000-1000-8000-00805f9b34fb"
 
-# Polar Measurement Data (PMD) — proprietary ECG service
-PMD_SERVICE_UUID = "FB005C80-02E7-F387-1CAD-8ACD2D8DF0C8"
+# Polar Measurement Data (PMD) — proprietary ECG/ACC service
 PMD_CP_UUID = "FB005C81-02E7-F387-1CAD-8ACD2D8DF0C8"
 PMD_DATA_UUID = "FB005C82-02E7-F387-1CAD-8ACD2D8DF0C8"
 
@@ -214,14 +213,16 @@ def parse_acc_frame(data: bytes) -> List[dict]:
     """
     Parse a Polar PMD Data notification carrying accelerometer samples.
 
-    Frame layout mirrors ECG:
-      byte 0    : measurement type (ACC for H10 PMD)
+    Frame layout:
+      byte 0    : measurement type (0x02 = ACC)
       bytes 1-8 : 64-bit timestamp, little-endian
       byte 9    : frame_type_byte
-                    bit 7 = 1 → compressed (unsupported here)
-                    bits 0-6   → frame type (0 = uncompressed Type 0)
-      bytes 10+ : ACC samples, 6 bytes each, little-endian:
-                    int16 x, int16 y, int16 z (all in mG)
+                    bit 7 = 1 → compressed (not handled here)
+                    bits 0-6   → frame type:
+                      0 = Type 0 — 1 byte/axis, signed int8, in mG
+                      1 = Type 1 — 2 bytes/axis, signed int16 LE, in mG  ← H10 default
+                      2 = Type 2 — 3 bytes/axis, signed int24 LE, in mG
+      bytes 10+ : samples, axes: x, y, z
 
     Returns a list of dicts:
       [{"x_mg": int, "y_mg": int, "z_mg": int}, ...]
@@ -243,16 +244,39 @@ def parse_acc_frame(data: bytes) -> List[dict]:
         raise ValueError(
             f"Compressed ACC frames are not supported (frame type byte {frame_type_byte:#04x})"
         )
-    if frame_type != 0:
-        raise ValueError(
-            f"Unsupported ACC frame type {frame_type} (only Type 0 implemented)"
-        )
 
-    samples: List[dict] = []
     payload = data[10:]
-    for i in range(0, len(payload) - 5, 6):
-        x_mg, y_mg, z_mg = struct.unpack_from("<hhh", payload, i)
-        samples.append({"x_mg": x_mg, "y_mg": y_mg, "z_mg": z_mg})
+    samples: List[dict] = []
+
+    if frame_type == 0:
+        # Type 0: 1 byte per axis, signed int8
+        for i in range(0, len(payload) - 2, 3):
+            x_mg = struct.unpack_from("<b", payload, i)[0]
+            y_mg = struct.unpack_from("<b", payload, i + 1)[0]
+            z_mg = struct.unpack_from("<b", payload, i + 2)[0]
+            samples.append({"x_mg": x_mg, "y_mg": y_mg, "z_mg": z_mg})
+    elif frame_type == 1:
+        # Type 1: 2 bytes per axis, signed int16 LE  (H10 sends this at 200 Hz / 16-bit)
+        for i in range(0, len(payload) - 5, 6):
+            x_mg, y_mg, z_mg = struct.unpack_from("<hhh", payload, i)
+            samples.append({"x_mg": x_mg, "y_mg": y_mg, "z_mg": z_mg})
+    elif frame_type == 2:
+        # Type 2: 3 bytes per axis, signed int24 LE
+        for i in range(0, len(payload) - 8, 9):
+
+            def s24(b: bytes, off: int) -> int:
+                raw = b[off] | (b[off + 1] << 8) | (b[off + 2] << 16)
+                return raw - 0x1000000 if raw >= 0x800000 else raw
+
+            samples.append(
+                {
+                    "x_mg": s24(payload, i),
+                    "y_mg": s24(payload, i + 3),
+                    "z_mg": s24(payload, i + 6),
+                }
+            )
+    else:
+        raise ValueError(f"Unsupported ACC frame type {frame_type}")
 
     return samples
 
@@ -322,17 +346,18 @@ async def ble_loop(stop_event: asyncio.Event) -> None:
                 # ── Heart rate ────────────────────────────────────────────────
                 await client.start_notify(HR_MEASUREMENT_UUID, handle_hr_notification)
 
-                # ── ECG via PMD ───────────────────────────────────────────────
-                # 1. Enable notifications on the PMD control point so we can
-                #    receive the start-measurement acknowledgement.
+                # ── ECG + ACC via PMD ─────────────────────────────────────────
+                # 1. Enable CP notifications (required before sending start commands).
                 await client.start_notify(PMD_CP_UUID, lambda _h, _d: None)
-                # 2. Subscribe to PMD data frames (ECG + ACC share one char)
-                #    before starting streams so the first packets are not lost.
+                # 2. Subscribe to PMD data frames (ECG + ACC share one characteristic).
                 await client.start_notify(PMD_DATA_UUID, handle_pmd_notification)
-                # 3. Write start commands for the desired PMD streams.
+                # 3. Start ECG then ACC (small gap avoids CP response contention).
                 await client.write_gatt_char(PMD_CP_UUID, ECG_START_CMD, response=True)
+                await asyncio.sleep(0.5)
                 try:
-                    await client.write_gatt_char(PMD_CP_UUID, ACC_START_CMD, response=True)
+                    await client.write_gatt_char(
+                        PMD_CP_UUID, ACC_START_CMD, response=True
+                    )
                 except Exception as exc:
                     print(f"[h10] ACC stream unavailable: {exc}")
 
