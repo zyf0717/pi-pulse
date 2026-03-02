@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 # services.sh — manage pi-pulse systemd services
 #
-# Usage (must be run with sudo for commands that write to /etc/systemd/system):
-#   sudo ./services.sh <command> [service ...]
+# Can be invoked from any directory — paths are resolved relative to the script.
+#
+# Usage:
+#   sudo -E ./rpi4/services.sh <command> [service ...]
+#
+#   sudo -E is required for write commands (install, remove, start, stop,
+#   restart, reload) so that $CONDA_PREFIX is preserved for uvicorn detection.
+#   'status' does not need sudo.
 #
 # Commands:
 #   install   substitute placeholders, copy units, daemon-reload, enable, start
@@ -14,16 +20,17 @@
 #   reload    daemon-reload only
 #
 # Examples:
-#   sudo ./services.sh install              # all services in this directory
-#   sudo ./services.sh install pulse sen66  # specific services
-#   sudo ./services.sh remove h10
-#   sudo ./services.sh restart
-#        ./services.sh status
+#   conda activate pi-pulse
+#   sudo -E ./rpi4/services.sh install              # all services
+#   sudo -E ./rpi4/services.sh install pulse sen66  # specific services
+#   sudo -E ./rpi4/services.sh remove h10
+#   sudo -E ./rpi4/services.sh restart
+#            ./rpi4/services.sh status
 #
 # Placeholder substitution (performed at install time):
-#   ${SERVICE_USER}  — user who owns the repo (SUDO_USER, or current user)
-#   ${WORKING_DIR}   — directory containing the service Python files (rpi4/)
-#   ${UVICORN_BIN}   — uvicorn executable found in the active Python environment
+#   ${SERVICE_USER}  — user who owns the repo ($SUDO_USER, or current user)
+#   ${WORKING_DIR}   — rpi4/ directory (where the .py files live)
+#   ${UVICORN_BIN}   — uvicorn found via $CONDA_PREFIX, venv/, .venv/, or PATH
 
 set -euo pipefail
 
@@ -201,7 +208,7 @@ cmd_reload() {
 
 # ── dispatch ───────────────────────────────────────────────────────────────────
 
-usage() { sed -n '3,22p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+usage() { sed -n '3,32p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
 
 [[ $# -ge 1 ]] || usage
 COMMAND="$1"; shift
