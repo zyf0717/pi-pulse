@@ -26,7 +26,7 @@ _NO_DATA_ANNOTATION = dict(
 )
 
 _H10_FIELDS = {"bpm": "heart_rate_bpm", "rr": "rr_last_ms"}
-_ECG_Y_RANGE = [-1700, 2000]
+_ECG_Y_RANGE = [-2000, 2500]
 
 
 def _h10_spark(
