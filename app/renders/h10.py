@@ -25,19 +25,23 @@ _NO_DATA_ANNOTATION = dict(
     font=dict(size=14),
 )
 
-_H10_FIELDS = {"bpm": "heart_rate_bpm", "rr": "rr_last_ms"}
+_H10_FIELDS = {
+    "bpm": "heart_rate_bpm",
+    "rr": "rr_last_ms",
+    "acc_dyn": "mean_dynamic_accel_mg",
+}
 _ECG_Y_RANGE = [-2000, 2500]
 
 
 def _h10_spark(
     device: str,
-    h10_latest: dict[str, reactive.Value],
-    h10_history: dict[str, deque],
+    latest_map: dict[str, reactive.Value],
+    history_map: dict[str, deque],
     field: str,
     *,
     fmt=None,
 ):
-    values = sparkline_values(device, H10_DEVICES, h10_latest, h10_history, field)
+    values = sparkline_values(device, H10_DEVICES, latest_map, history_map, field)
     if values is None:
         return ui.HTML("")
     return sparkline(values, fmt=fmt) if fmt else sparkline(values)
@@ -60,6 +64,9 @@ def _apply_h10_layout(h10_widget: go.FigureWidget, chart: str, tpl: str) -> None
         h10_widget.layout.xaxis = {}
     elif chart == "rr":
         h10_widget.layout.yaxis = dict(title="ms")
+        h10_widget.layout.xaxis = {}
+    elif chart == "acc_dyn":
+        h10_widget.layout.yaxis = dict(title="mg")
         h10_widget.layout.xaxis = {}
     else:
         h10_widget.layout.yaxis = dict(
@@ -137,6 +144,8 @@ def register_h10_renders(
     h10_history: dict[str, deque],
     h10_ecg_latest: dict[str, reactive.Value],
     h10_ecg_samples: dict[str, deque],
+    h10_acc_latest: dict[str, reactive.Value],
+    h10_acc_history: dict[str, deque],
     plotly_tpl,
     h10_widget: go.FigureWidget,
     h10_state: dict,
@@ -174,6 +183,16 @@ def register_h10_renders(
         sample_rate_hz = ecg_chunk.get("sample_rate_hz", 130)
         return f"{sample_rate_hz:.0f} Hz"
 
+    @render.text
+    def h10_acc_val():
+        return metric_value(
+            input.device(),
+            H10_DEVICES,
+            h10_acc_latest,
+            "mean_dynamic_accel_mg",
+            lambda value: f"{value:.0f} mg",
+        )
+
     @render.ui
     def h10_bpm_spark():
         return _h10_spark(
@@ -192,6 +211,16 @@ def register_h10_renders(
             h10_history,
             "rr_last_ms",
             fmt=lambda value: f"{value:.0f} ms",
+        )
+
+    @render.ui
+    def h10_acc_spark():
+        return _h10_spark(
+            input.device(),
+            h10_acc_latest,
+            h10_acc_history,
+            "mean_dynamic_accel_mg",
+            fmt=lambda value: f"{value:.0f} mg",
         )
 
     @render.ui
@@ -230,6 +259,9 @@ def register_h10_renders(
                     },
                 )
             ]
+        elif chart == "acc_dyn":
+            h10_acc_latest[dev]()
+            history = list(h10_acc_history[dev])
         else:
             h10_latest[dev]()
             history = list(h10_history[dev])

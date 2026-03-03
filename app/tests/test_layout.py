@@ -75,6 +75,7 @@ def _load_layout_module(monkeypatch):
         "bpm": "Heart Rate (BPM)",
         "rr": "Last RR Interval (ms)",
         "ecg": "ECG (µV)",
+        "acc_dyn": "Mean Dynamic Acceleration (mg)",
     }
 
     monkeypatch.setitem(sys.modules, "shiny", fake_shiny)
@@ -154,12 +155,13 @@ def test_h10_cards_match_chart_mapping(monkeypatch) -> None:
 
     cards = module._h10_cards()
 
-    assert len(cards) == 3
-    assert [card["kwargs"]["data-chart-target"] for card in cards] == ["h10_chart"] * 3
+    assert len(cards) == 4
+    assert [card["kwargs"]["data-chart-target"] for card in cards] == ["h10_chart"] * 4
     assert [card["kwargs"]["data-chart-value"] for card in cards] == [
         "bpm",
         "rr",
         "ecg",
+        "acc_dyn",
     ]
 
 
