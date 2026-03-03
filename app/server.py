@@ -71,7 +71,11 @@ def _normalize_h10_sample(data: dict) -> dict:
 
 def _normalize_h10_ecg_chunk(data: dict) -> dict:
     sample_rate = data.get("sample_rate_hz", 130)
-    if not isinstance(sample_rate, int) or isinstance(sample_rate, bool) or sample_rate <= 0:
+    if (
+        not isinstance(sample_rate, int)
+        or isinstance(sample_rate, bool)
+        or sample_rate <= 0
+    ):
         sample_rate = 130
 
     samples = data.get("samples_uv", [])
@@ -90,7 +94,11 @@ def _normalize_h10_ecg_chunk(data: dict) -> dict:
 
 def _normalize_h10_acc_chunk(data: dict) -> dict:
     sample_rate = data.get("sample_rate_hz", 200)
-    if not isinstance(sample_rate, int) or isinstance(sample_rate, bool) or sample_rate <= 0:
+    if (
+        not isinstance(sample_rate, int)
+        or isinstance(sample_rate, bool)
+        or sample_rate <= 0
+    ):
         sample_rate = 200
 
     samples = data.get("samples_mg", [])
@@ -157,9 +165,6 @@ def _mean_xyz_mg(samples_mg: list[dict]) -> tuple[float, float, float]:
 
 def server(input, output, session):
     shinyswatch.theme_picker_server()
-    _h10_ecg_frame_s = 1 / 30
-    _h10_ecg_buffer_s = 0.5
-    _h10_motion_frame_s = 1 / 30
 
     # ── Plotly template (tracks chart_style input) ────────────────────────────
     @reactive.calc
@@ -227,11 +232,11 @@ def server(input, output, session):
     h10_ecg_latest: dict[str, reactive.Value] = {
         k: reactive.Value(dict(_h10_ecg_default)) for k in H10_DEVICES
     }
-    h10_ecg_samples: dict[str, deque] = {k: deque(maxlen=1300) for k in H10_DEVICES}
-    h10_ecg_pending: dict[str, deque] = {k: deque() for k in H10_DEVICES}
+    _h10_ecg_display_samples = 260  # 2 s at 130 Hz
+    h10_ecg_samples: dict[str, deque] = {
+        k: deque(maxlen=_h10_ecg_display_samples) for k in H10_DEVICES
+    }
     h10_ecg_sample_rate: dict[str, int] = {k: 130 for k in H10_DEVICES}
-    h10_ecg_buffer_until: dict[str, float | None] = {k: None for k in H10_DEVICES}
-    h10_ecg_fractional: dict[str, float] = {k: 0.0 for k in H10_DEVICES}
     _h10_acc_default = {
         "mean_dynamic_accel_mg": 0.0,
         "sample_rate_hz": 200,
@@ -246,9 +251,6 @@ def server(input, output, session):
     h10_motion_latest: dict[str, reactive.Value] = {
         k: reactive.Value(dict(_h10_motion_default)) for k in H10_DEVICES
     }
-    h10_motion_pending: dict[str, deque] = {k: deque() for k in H10_DEVICES}
-    h10_motion_sample_rate: dict[str, int] = {k: 200 for k in H10_DEVICES}
-    h10_motion_fractional: dict[str, float] = {k: 0.0 for k in H10_DEVICES}
     motion_trail_len = max(6, int(round(30 * H10_ACC_DYNAMIC_WINDOW_S)))
     h10_motion_trail: dict[str, deque] = {
         k: deque(maxlen=motion_trail_len) for k in H10_DEVICES
@@ -256,6 +258,7 @@ def server(input, output, session):
     h10_motion_gravity: dict[str, tuple[float, float, float]] = {
         k: (0.0, 0.0, 1000.0) for k in H10_DEVICES
     }
+    h10_motion_last_time: dict[str, float | None] = {k: None for k in H10_DEVICES}
 
     # ── SSE callbacks ─────────────────────────────────────────────────────────
     async def on_pulse(key: str, data: dict):
@@ -277,23 +280,27 @@ def server(input, output, session):
 
     async def on_h10_ecg(key: str, data: dict):
         normalized = _normalize_h10_ecg_chunk(data)
-        was_idle = not h10_ecg_pending[key]
-        h10_ecg_pending[key].extend(normalized["samples_uv"])
+        if not normalized["samples_uv"]:
+            return
+        h10_ecg_samples[key].extend(normalized["samples_uv"])
         h10_ecg_sample_rate[key] = normalized["sample_rate_hz"]
-        if was_idle:
-            h10_ecg_buffer_until[key] = time.monotonic() + _h10_ecg_buffer_s
-            h10_ecg_fractional[key] = 0.0
+        h10_ecg_latest[key].set({
+            "samples_uv": list(h10_ecg_samples[key]),
+            "sample_rate_hz": h10_ecg_sample_rate[key],
+        })
 
     async def on_h10_acc(key: str, data: dict):
         normalized = _normalize_h10_acc_chunk(data)
         if not normalized["samples_mg"]:
             return
-        h10_acc_pending[key].extend(normalized["samples_mg"])
+        samples_mg = normalized["samples_mg"]
         h10_acc_sample_rate[key] = normalized["sample_rate_hz"]
-        h10_motion_pending[key].extend(normalized["samples_mg"])
-        h10_motion_sample_rate[key] = normalized["sample_rate_hz"]
 
-        window_size = max(1, int(round(h10_acc_sample_rate[key] * H10_ACC_DYNAMIC_WINDOW_S)))
+        # ── Dynamic acceleration ───────────────────────────────────────────────
+        h10_acc_pending[key].extend(samples_mg)
+        window_size = max(
+            1, int(round(h10_acc_sample_rate[key] * H10_ACC_DYNAMIC_WINDOW_S))
+        )
         while len(h10_acc_pending[key]) >= window_size:
             second_samples = [
                 h10_acc_pending[key].popleft() for _ in range(window_size)
@@ -305,89 +312,26 @@ def server(input, output, session):
             h10_acc_history[key].append((datetime.now(), aggregated))
             h10_acc_latest[key].set(aggregated)
 
-    async def pump_h10_motion(key: str):
-        last_tick = time.monotonic()
-        try:
-            while True:
-                await asyncio.sleep(_h10_motion_frame_s)
-                now = time.monotonic()
-                dt = now - last_tick
-                last_tick = now
-
-                if not h10_motion_pending[key]:
-                    h10_motion_fractional[key] = 0.0
-                    continue
-
-                h10_motion_fractional[key] += dt * h10_motion_sample_rate[key]
-                samples_to_release = int(h10_motion_fractional[key])
-                if samples_to_release <= 0:
-                    continue
-
-                h10_motion_fractional[key] -= samples_to_release
-                released: list[dict] = []
-                while h10_motion_pending[key] and len(released) < samples_to_release:
-                    released.append(h10_motion_pending[key].popleft())
-                if not released:
-                    continue
-
-                mean_x, mean_y, mean_z = _mean_xyz_mg(released)
-                gravity_x, gravity_y, gravity_z = h10_motion_gravity[key]
-                gravity_alpha = min(1.0, dt / max(H10_ACC_DYNAMIC_WINDOW_S, 0.001))
-                next_gravity = (
-                    gravity_x + ((mean_x - gravity_x) * gravity_alpha),
-                    gravity_y + ((mean_y - gravity_y) * gravity_alpha),
-                    gravity_z + ((mean_z - gravity_z) * gravity_alpha),
-                )
-                h10_motion_gravity[key] = next_gravity
-                h10_motion_trail[key].append(next_gravity)
-                frame = {"trail_points": list(h10_motion_trail[key])}
-                async with reactive.lock():
-                    h10_motion_latest[key].set(frame)
-                    await reactive.flush()
-        except asyncio.CancelledError:
-            return
-
-    async def pump_h10_ecg(key: str):
-        last_tick = time.monotonic()
-        try:
-            while True:
-                await asyncio.sleep(_h10_ecg_frame_s)
-                now = time.monotonic()
-                dt = now - last_tick
-                last_tick = now
-
-                if not h10_ecg_pending[key]:
-                    h10_ecg_fractional[key] = 0.0
-                    continue
-
-                buffer_until = h10_ecg_buffer_until[key]
-                if buffer_until is not None:
-                    if now < buffer_until:
-                        continue
-                    h10_ecg_buffer_until[key] = None
-
-                h10_ecg_fractional[key] += dt * h10_ecg_sample_rate[key]
-                samples_to_release = int(h10_ecg_fractional[key])
-                if samples_to_release <= 0:
-                    continue
-
-                h10_ecg_fractional[key] -= samples_to_release
-                released: list[int] = []
-                while h10_ecg_pending[key] and len(released) < samples_to_release:
-                    released.append(h10_ecg_pending[key].popleft())
-                if not released:
-                    continue
-
-                h10_ecg_samples[key].extend(released)
-                frame = {
-                    "samples_uv": list(h10_ecg_samples[key]),
-                    "sample_rate_hz": h10_ecg_sample_rate[key],
-                }
-                async with reactive.lock():
-                    h10_ecg_latest[key].set(frame)
-                    await reactive.flush()
-        except asyncio.CancelledError:
-            return
+        # ── Gravity / motion trail ─────────────────────────────────────────────
+        now = time.monotonic()
+        last = h10_motion_last_time[key]
+        dt = (
+            (now - last)
+            if last is not None
+            else len(samples_mg) / max(h10_acc_sample_rate[key], 1)
+        )
+        h10_motion_last_time[key] = now
+        mean_x, mean_y, mean_z = _mean_xyz_mg(samples_mg)
+        gravity_x, gravity_y, gravity_z = h10_motion_gravity[key]
+        gravity_alpha = min(1.0, dt / max(H10_ACC_DYNAMIC_WINDOW_S, 0.001))
+        next_gravity = (
+            gravity_x + ((mean_x - gravity_x) * gravity_alpha),
+            gravity_y + ((mean_y - gravity_y) * gravity_alpha),
+            gravity_z + ((mean_z - gravity_z) * gravity_alpha),
+        )
+        h10_motion_gravity[key] = next_gravity
+        h10_motion_trail[key].append(next_gravity)
+        h10_motion_latest[key].set({"trail_points": list(h10_motion_trail[key])})
 
     # ── Start all streams at session open ─────────────────────────────────────
     tasks = (
@@ -441,8 +385,6 @@ def server(input, output, session):
             for k, v in H10_DEVICES.items()
             if v.get("acc_stream")
         ]
-        + [asyncio.create_task(pump_h10_ecg(k)) for k in H10_DEVICES]
-        + [asyncio.create_task(pump_h10_motion(k)) for k in H10_DEVICES]
     )
     session.on_ended(lambda: [t.cancel() for t in tasks])
 
