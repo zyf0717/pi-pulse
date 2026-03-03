@@ -53,7 +53,8 @@ def test_chart_option_mappings_are_stable() -> None:
     assert config.SEN66_CHARTS["pm_nc"] == "PM Number Concentration (#/cm³)"
     assert config.H10_CHARTS["rr"] == "Last RR Interval (ms)"
     assert config.H10_CHARTS["ecg"] == "ECG (µV)"
-    assert config.H10_CHARTS["acc_dyn"] == "Mean Dynamic Acceleration (mg)"
+    assert config.H10_CHARTS["acc_dyn"] == "Mean Dynamic Acceleration"
+    assert config.H10_CHARTS["motion"] == "Acceleration Axes"
 
 
 def test_load_raw_config_reads_explicit_path(tmp_path: Path) -> None:

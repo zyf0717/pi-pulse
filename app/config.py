@@ -88,5 +88,6 @@ H10_CHARTS = {
     "bpm": "Heart Rate (BPM)",
     "rr": "Last RR Interval (ms)",
     "ecg": "ECG (µV)",
-    "acc_dyn": "Mean Dynamic Acceleration (mg)",
+    "acc_dyn": "Mean Dynamic Acceleration",
+    "motion": "Acceleration Axes",
 }
