@@ -232,7 +232,7 @@ def server(input, output, session):
     h10_ecg_latest: dict[str, reactive.Value] = {
         k: reactive.Value(dict(_h10_ecg_default)) for k in H10_DEVICES
     }
-    _h10_ecg_display_samples = 260  # 2 s at 130 Hz
+    _h10_ecg_display_samples = 1300  # 10 s at 130 Hz
     h10_ecg_samples: dict[str, deque] = {
         k: deque(maxlen=_h10_ecg_display_samples) for k in H10_DEVICES
     }
@@ -284,10 +284,12 @@ def server(input, output, session):
             return
         h10_ecg_samples[key].extend(normalized["samples_uv"])
         h10_ecg_sample_rate[key] = normalized["sample_rate_hz"]
-        h10_ecg_latest[key].set({
-            "samples_uv": list(h10_ecg_samples[key]),
-            "sample_rate_hz": h10_ecg_sample_rate[key],
-        })
+        h10_ecg_latest[key].set(
+            {
+                "samples_uv": list(h10_ecg_samples[key]),
+                "sample_rate_hz": h10_ecg_sample_rate[key],
+            }
+        )
 
     async def on_h10_acc(key: str, data: dict):
         normalized = _normalize_h10_acc_chunk(data)
