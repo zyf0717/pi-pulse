@@ -1,12 +1,19 @@
 """
 Low-level Polar H10 protocol helpers.
 
-This module keeps the PMD constants, start commands, and binary frame parsers
-separate from the FastAPI/BLE service entrypoint in h10.py.
+This module keeps the PMD constants, start commands, binary frame parsers, and
+the resilient BLE connection loop separate from the FastAPI service in h10.py.
 """
 
+import asyncio
+import logging
 import struct
+from collections.abc import Awaitable, Callable
 from typing import List
+
+from bleak import BleakClient, BleakError, BleakScanner
+
+log = logging.getLogger(__name__)
 
 H10_ADDRESS = "AA:BB:CC:DD:EE:01"
 
@@ -203,3 +210,116 @@ def parse_acc_frame(data: bytes) -> List[dict]:
         return _parse_acc_type2(payload)
 
     raise ValueError(f"Unsupported ACC frame type {frame_type}")
+
+
+# ---------------------------------------------------------------------------
+# Resilient BLE connection loop
+# ---------------------------------------------------------------------------
+
+
+async def ble_connect_loop(
+    address: str,
+    stop_event: asyncio.Event,
+    on_connect: Callable[[BleakClient], Awaitable[None]],
+    *,
+    scan_timeout_s: float = 10.0,
+    backoff_s: float = 5.0,
+) -> None:
+    """Resilient BLE connection loop for a single peripheral.
+
+    The loop follows this protocol::
+
+        while not stopped:
+            find device          – BleakScanner with *scan_timeout_s*
+            connect              – BleakClient async context manager
+            on_connect(client)   – caller subscribes to notifications / writes
+                                   start commands; must return promptly
+            wait until disconnected or stop_event set
+            backoff *backoff_s* seconds
+            retry
+
+    Parameters
+    ----------
+    address:
+        Bluetooth address of the target device (e.g. ``H10_ADDRESS``).
+    stop_event:
+        Set this event from outside to request a clean shutdown.
+    on_connect:
+        Async callable invoked once a connection is established.  Receives the
+        live ``BleakClient`` and should subscribe to notifications and issue
+        any start commands.  It should return quickly; do **not** block inside
+        it waiting for data.
+    scan_timeout_s:
+        How long to wait for the device to be found during each scan attempt.
+    backoff_s:
+        Seconds to sleep between reconnection attempts.
+    """
+    while not stop_event.is_set():
+        # ── 1. Find device ─────────────────────────────────────────────────
+        try:
+            device = await BleakScanner.find_device_by_address(
+                address, timeout=scan_timeout_s
+            )
+        except BleakError as exc:
+            log.warning("[ble] Scan error: %s – retrying in %.0f s", exc, backoff_s)
+            await asyncio.sleep(backoff_s)
+            continue
+
+        if device is None:
+            log.warning(
+                "[ble] Device %s not found – retrying in %.0f s", address, backoff_s
+            )
+            await asyncio.sleep(backoff_s)
+            continue
+
+        # ── 2. Connect ─────────────────────────────────────────────────────
+        disconnected_event = asyncio.Event()
+
+        def _on_disconnect(_client: BleakClient) -> None:
+            disconnected_event.set()
+
+        try:
+            async with BleakClient(
+                device, disconnected_callback=_on_disconnect
+            ) as client:
+                log.info("[ble] Connected to %s", address)
+
+                # ── 3. Subscribe to notifications ──────────────────────────
+                await on_connect(client)
+
+                # ── 4. Wait until disconnected or stop requested ───────────
+                disc_task = asyncio.ensure_future(disconnected_event.wait())
+                stop_task = asyncio.ensure_future(stop_event.wait())
+                try:
+                    done, pending = await asyncio.wait(
+                        {disc_task, stop_task},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                finally:
+                    for t in (disc_task, stop_task):
+                        t.cancel()
+                        try:
+                            await t
+                        except (asyncio.CancelledError, Exception):
+                            pass
+
+                if stop_event.is_set():
+                    log.info("[ble] Stop requested – exiting connection loop")
+                    return
+
+                log.warning("[ble] Disconnected from %s", address)
+
+        except BleakError as exc:
+            if stop_event.is_set():
+                return
+            log.warning("[ble] BLE error: %s – reconnecting in %.0f s", exc, backoff_s)
+        except Exception as exc:  # noqa: BLE001
+            if stop_event.is_set():
+                return
+            log.warning(
+                "[ble] Unexpected error: %s – reconnecting in %.0f s", exc, backoff_s
+            )
+
+        # ── 5. Backoff before retry ─────────────────────────────────────────
+        if not stop_event.is_set():
+            await asyncio.sleep(backoff_s)

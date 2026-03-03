@@ -13,7 +13,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from bleak import BleakClient, BleakError
+from bleak import BleakClient
 from fastapi import FastAPI
 
 try:
@@ -29,6 +29,7 @@ try:
         PMD_DATA_UUID,
         PMD_MEAS_TYPE_ACC,
         PMD_MEAS_TYPE_ECG,
+        ble_connect_loop,
         parse_acc_frame,
         parse_ecg_frame,
         parse_hr_measurement,
@@ -47,6 +48,7 @@ except ImportError:
         PMD_DATA_UUID,
         PMD_MEAS_TYPE_ACC,
         PMD_MEAS_TYPE_ECG,
+        ble_connect_loop,
         parse_acc_frame,
         parse_ecg_frame,
         parse_hr_measurement,
@@ -117,42 +119,23 @@ async def ble_loop(stop_event: asyncio.Event) -> None:
                 },
             )
 
-    while not stop_event.is_set():
+    async def on_connect(client: BleakClient) -> None:
+        global _latest
+        _latest = {}
+        await client.start_notify(HR_MEASUREMENT_UUID, handle_hr_notification)
+
+        # ECG and ACC share the Polar PMD data characteristic.
+        await client.start_notify(PMD_CP_UUID, lambda _h, _d: None)
+        await client.start_notify(PMD_DATA_UUID, handle_pmd_notification)
+
+        await client.write_gatt_char(PMD_CP_UUID, ECG_START_CMD, response=True)
+        await asyncio.sleep(0.5)
         try:
-            async with BleakClient(H10_ADDRESS) as client:
-                await client.start_notify(HR_MEASUREMENT_UUID, handle_hr_notification)
-
-                # ECG and ACC share the Polar PMD data characteristic.
-                await client.start_notify(PMD_CP_UUID, lambda _h, _d: None)
-                await client.start_notify(PMD_DATA_UUID, handle_pmd_notification)
-
-                await client.write_gatt_char(PMD_CP_UUID, ECG_START_CMD, response=True)
-                await asyncio.sleep(0.5)
-                try:
-                    await client.write_gatt_char(
-                        PMD_CP_UUID, ACC_START_CMD, response=True
-                    )
-                except Exception as exc:
-                    print(f"[h10] ACC stream unavailable: {exc}")
-
-                await stop_event.wait()
-
-                await client.stop_notify(HR_MEASUREMENT_UUID)
-                await client.stop_notify(PMD_DATA_UUID)
-                await client.stop_notify(PMD_CP_UUID)
-
-        except BleakError as exc:
-            if stop_event.is_set():
-                break
-            _latest = {}
-            print(f"[h10] BLE error: {exc} - reconnecting in 5 s")
-            await asyncio.sleep(5)
+            await client.write_gatt_char(PMD_CP_UUID, ACC_START_CMD, response=True)
         except Exception as exc:
-            if stop_event.is_set():
-                break
-            _latest = {}
-            print(f"[h10] Unexpected error: {exc} - reconnecting in 5 s")
-            await asyncio.sleep(5)
+            print(f"[h10] ACC stream unavailable: {exc}")
+
+    await ble_connect_loop(H10_ADDRESS, stop_event, on_connect)
 
 
 @asynccontextmanager
