@@ -247,18 +247,17 @@ def _h10_cards():
         "tooltip_h10_acc": _sensor_tooltip(
             "Mean Dynamic Acceleration",
             "tooltip_h10_acc",
-            f"Calculated over a {window_s} s window.",
-            "The app first estimates the average X/Y/Z acceleration in that window.",
-            "It then subtracts that average from each sample and averages the remaining magnitudes.",
-            "Higher values mean more movement during that window.",
+            f"Average movement over the last {window_s} s.",
+            "Baseline tilt/gravity is removed first.",
+            "Higher values mean more motion during that window.",
         ),
         "tooltip_h10_tilt": _sensor_tooltip(
             "Acceleration Axes",
             "tooltip_h10_tilt",
             "At rest, one axis is often near 1000 mg because gravity is about 1 g.",
             "Which axis is near 1000 mg depends on how the strap is oriented.",
-            "The graphs show recent X-Y, X-Z, and Y-Z acceleration pairs over time.",
-            "In simple terms: they show which direction gravity and motion are pushing the sensor.",
+            "The expanded graphs show recent X-Y, X-Z, and Y-Z acceleration pairs over time.",
+            "They show which direction gravity and motion are acting on the sensor.",
         ),
     }
     cards = [
