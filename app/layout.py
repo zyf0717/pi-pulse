@@ -39,6 +39,16 @@ _KEEPALIVE_JS = """
 _CARD_CLICK_JS = """
 <script>
 (function () {
+  function findMetricCardTrigger(node) {
+    while (node) {
+      if (node.classList && node.classList.contains("metric-card-trigger")) {
+        return node;
+      }
+      node = node.parentNode;
+    }
+    return null;
+  }
+
   function activateMetricCard(node) {
     var targetId = node.getAttribute("data-chart-target");
     var nextValue = node.getAttribute("data-chart-value");
@@ -51,7 +61,7 @@ _CARD_CLICK_JS = """
   }
 
   document.addEventListener("click", function (event) {
-    var trigger = event.target.closest(".metric-card-trigger");
+    var trigger = findMetricCardTrigger(event.target);
     if (!trigger) {
       return;
     }
@@ -62,7 +72,7 @@ _CARD_CLICK_JS = """
     if (event.key !== "Enter" && event.key !== " ") {
       return;
     }
-    var trigger = event.target.closest(".metric-card-trigger");
+    var trigger = findMetricCardTrigger(event.target);
     if (!trigger) {
       return;
     }
@@ -109,8 +119,37 @@ def _metric_card(
     return ui.div(
         ui.card(
             ui.card_header(header_content),
-            ui.div(ui.output_text(value_output_id), class_="fs-3 fw-bold p-2"),
-            ui.output_ui(spark_output_id),
+            ui.div(
+                ui.div(ui.output_text(value_output_id), class_="fs-3 fw-bold p-2"),
+                ui.output_ui(spark_output_id),
+                style="pointer-events:none;",
+            ),
+        ),
+        **{
+            "class": _CARD_ATTRS_CLASS,
+            "role": "button",
+            "tabindex": "0",
+            "style": "cursor:pointer;",
+            "data-chart-target": chart_target,
+            "data-chart-value": chart_value,
+        },
+    )
+
+
+def _visual_card(
+    header_content,
+    preview_output_id: str,
+    *,
+    chart_target: str,
+    chart_value: str,
+):
+    return ui.div(
+        ui.card(
+            ui.card_header(header_content),
+            ui.div(
+                ui.output_ui(preview_output_id),
+                style="pointer-events:none;",
+            ),
         ),
         **{
             "class": _CARD_ATTRS_CLASS,
@@ -199,7 +238,7 @@ def _sen66_cards():
 
 
 def _h10_cards():
-    return [
+    cards = [
         _metric_card(
             title,
             value_output_id,
@@ -209,6 +248,7 @@ def _h10_cards():
         )
         for title, value_output_id, spark_output_id, chart_value in _H10_CARD_SPECS
     ]
+    return cards
 
 
 def _system_panel():

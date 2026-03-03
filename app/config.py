@@ -66,7 +66,7 @@ H10_DEVICES = _SETTINGS["h10_devices"]
 H10_DEFAULT_DEV = _SETTINGS["h10_default_dev"]
 ALL_DEVICES = _SETTINGS["all_devices"]
 ALL_DEVICES_DEFAULT = _SETTINGS["all_devices_default"]
-H10_ACC_DYNAMIC_WINDOW_S = 1.0
+H10_ACC_DYNAMIC_WINDOW_S = 0.5
 
 PULSE_CHARTS = {
     "cpu": "CPU Usage (%)",
