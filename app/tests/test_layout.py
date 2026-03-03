@@ -168,7 +168,8 @@ def test_h10_cards_match_chart_mapping(monkeypatch) -> None:
 def test_card_click_script_updates_existing_selects(monkeypatch) -> None:
     module = _load_layout_module(monkeypatch)
 
-    assert ".metric-card-trigger" in module._CARD_CLICK_JS
+    assert 'classList.contains("metric-card-trigger")' in module._CARD_CLICK_JS
+    assert "node = node.parentNode" in module._CARD_CLICK_JS
     assert 'getAttribute("data-chart-target")' in module._CARD_CLICK_JS
     assert (
         'dispatchEvent(new Event("change", { bubbles: true }))' in module._CARD_CLICK_JS
