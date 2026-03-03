@@ -254,7 +254,7 @@ def _h10_cards():
         "tooltip_h10_tilt": _sensor_tooltip(
             "Acceleration Axes",
             "tooltip_h10_tilt",
-            "At rest, one axis is often near 1000 mg because gravity is about 1 g.",
+            "At rest, one axis is often near 1000 mg because gravity is about 1g (≈9.81 m/s²).",
             "Which axis is near 1000 mg depends on how the strap is oriented.",
             "The expanded graphs show recent X-Y, X-Z, and Y-Z acceleration pairs over time.",
             "They show which direction gravity and motion are acting on the sensor.",
