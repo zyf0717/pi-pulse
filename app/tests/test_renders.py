@@ -126,6 +126,10 @@ def _load_render_module(monkeypatch, filename: str, config_attrs: dict):
         return fn
 
     fake_shinywidgets.render_widget = render_widget
+    fake_shinywidgets.output_widget = lambda output_id: {
+        "tag": "output_widget",
+        "id": output_id,
+    }
 
     fake_plotly = ModuleType("plotly")
     fake_graph_objects = ModuleType("plotly.graph_objects")
@@ -292,7 +296,8 @@ def test_h10_value_boxes_format_current_snapshot(monkeypatch) -> None:
                 "bpm": "Heart Rate (BPM)",
                 "rr": "Last RR Interval (ms)",
                 "ecg": "ECG (µV)",
-                "acc_dyn": "Mean Dynamic Acceleration (mg)",
+                "acc_dyn": "Mean Dynamic Acceleration",
+                "motion": "Acceleration Axes",
             },
         },
     )
@@ -315,6 +320,7 @@ def test_h10_value_boxes_format_current_snapshot(monkeypatch) -> None:
         {"11": deque([1, 2, 3])},
         {"11": _FakeValue({"mean_dynamic_accel_mg": 18.4, "sample_rate_hz": 200})},
         {"11": deque([(None, {"mean_dynamic_accel_mg": 18.4})])},
+        {"11": _FakeValue({"trail_points": [(0.0, 0.0, 1000.0), (10.0, -5.0, 980.0)]})},
         lambda: "plotly_dark",
         _FakeFigureWidget(),
         {"chart": None, "dev": None, "tpl": None},
@@ -326,6 +332,14 @@ def test_h10_value_boxes_format_current_snapshot(monkeypatch) -> None:
     assert registry.text["h10_acc_val"]() == "18 mg"
     assert registry.ui["h10_ecg_spark"]() == "SPARK:['1 µV', '2 µV', '3 µV']"
     assert registry.ui["h10_acc_spark"]() == "SPARK:['18 mg']"
+    motion_preview = registry.ui["h10_motion_preview"]()
+    assert "<svg" in motion_preview
+    assert "polyline" in motion_preview
+    assert ">X<" in motion_preview
+    assert ">Y<" in motion_preview
+    assert "+1500" not in motion_preview
+    assert "10 mg" not in motion_preview
+    assert registry.ui["h10_detail_view"]() == {"tag": "output_widget", "id": "h10_graph"}
 
 
 def test_h10_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> None:
@@ -345,7 +359,8 @@ def test_h10_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> None
                 "bpm": "Heart Rate (BPM)",
                 "rr": "Last RR Interval (ms)",
                 "ecg": "ECG (µV)",
-                "acc_dyn": "Mean Dynamic Acceleration (mg)",
+                "acc_dyn": "Mean Dynamic Acceleration",
+                "motion": "Acceleration Axes",
             },
         },
     )
@@ -358,6 +373,7 @@ def test_h10_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> None
         {"11": deque([1, 2, 3])},
         {"11": _FakeValue({"mean_dynamic_accel_mg": 18.4, "sample_rate_hz": 200})},
         {"11": deque([(None, {"mean_dynamic_accel_mg": 18.4})])},
+        {"11": _FakeValue({"trail_points": []})},
         lambda: "plotly_dark",
         _FakeFigureWidget(),
         {"chart": None, "dev": None, "tpl": None},
@@ -371,6 +387,7 @@ def test_h10_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> None
     assert registry.ui["h10_rr_last_spark"]() == ""
     assert registry.ui["h10_ecg_spark"]() == ""
     assert registry.ui["h10_acc_spark"]() == ""
+    assert registry.ui["h10_motion_preview"]() == ""
 
 
 def test_pulse_invalid_device_clears_chart_and_resets_state(monkeypatch) -> None:
@@ -467,7 +484,8 @@ def test_h10_invalid_device_clears_chart_sets_annotation_and_resets_state(
                 "bpm": "Heart Rate (BPM)",
                 "rr": "Last RR Interval (ms)",
                 "ecg": "ECG (µV)",
-                "acc_dyn": "Mean Dynamic Acceleration (mg)",
+                "acc_dyn": "Mean Dynamic Acceleration",
+                "motion": "Acceleration Axes",
             },
         },
     )
@@ -484,6 +502,7 @@ def test_h10_invalid_device_clears_chart_sets_annotation_and_resets_state(
         {"11": deque([1, 2, 3])},
         {"11": _FakeValue({"mean_dynamic_accel_mg": 18.4, "sample_rate_hz": 200})},
         {"11": deque([(None, {"mean_dynamic_accel_mg": 18.4})])},
+        {"11": _FakeValue({"trail_points": []})},
         lambda: "plotly_dark",
         widget,
         state,
@@ -513,7 +532,8 @@ def test_h10_ecg_chart_updates_shared_widget(monkeypatch) -> None:
                 "bpm": "Heart Rate (BPM)",
                 "rr": "Last RR Interval (ms)",
                 "ecg": "ECG (µV)",
-                "acc_dyn": "Mean Dynamic Acceleration (mg)",
+                "acc_dyn": "Mean Dynamic Acceleration",
+                "motion": "Acceleration Axes",
             },
         },
     )
@@ -527,6 +547,7 @@ def test_h10_ecg_chart_updates_shared_widget(monkeypatch) -> None:
         {"11": deque([10, 20, 30])},
         {"11": _FakeValue({"mean_dynamic_accel_mg": 18.4, "sample_rate_hz": 200})},
         {"11": deque([(None, {"mean_dynamic_accel_mg": 18.4})])},
+        {"11": _FakeValue({"trail_points": []})},
         lambda: "plotly_dark",
         widget,
         {"chart": None, "dev": None, "tpl": None},
@@ -558,7 +579,8 @@ def test_h10_dynamic_accel_chart_uses_per_second_history(monkeypatch) -> None:
                 "bpm": "Heart Rate (BPM)",
                 "rr": "Last RR Interval (ms)",
                 "ecg": "ECG (µV)",
-                "acc_dyn": "Mean Dynamic Acceleration (mg)",
+                "acc_dyn": "Mean Dynamic Acceleration",
+                "motion": "Acceleration Axes",
             },
         },
     )
@@ -578,6 +600,7 @@ def test_h10_dynamic_accel_chart_uses_per_second_history(monkeypatch) -> None:
         {"11": deque([10, 20, 30])},
         {"11": _FakeValue({"mean_dynamic_accel_mg": 18.0, "sample_rate_hz": 200})},
         {"11": acc_history},
+        {"11": _FakeValue({"trail_points": []})},
         lambda: "plotly_dark",
         widget,
         {"chart": None, "dev": None, "tpl": None},
@@ -587,8 +610,61 @@ def test_h10_dynamic_accel_chart_uses_per_second_history(monkeypatch) -> None:
 
     assert len(widget.data) == 1
     assert widget.data[0].y == [12.0, 18.0]
-    assert widget.data[0].name == "Mean Dynamic Acceleration (mg)"
+    assert widget.data[0].name == "Mean Dynamic Acceleration"
     assert widget.layout.yaxis["title"] == "mg"
+
+
+def test_h10_motion_chart_renders_svg_detail_instead_of_plotly(monkeypatch) -> None:
+    module, registry = _load_render_module(
+        monkeypatch,
+        "h10.py",
+        {
+            "H10_DEVICES": {
+                "11": {
+                    "label": "11 (192.168.121.11)",
+                    "stream": "http://h10-11",
+                    "ecg_stream": "http://h10-11/ecg",
+                    "acc_stream": "http://h10-11/acc",
+                }
+            },
+            "H10_CHARTS": {
+                "bpm": "Heart Rate (BPM)",
+                "rr": "Last RR Interval (ms)",
+                "ecg": "ECG (µV)",
+                "acc_dyn": "Mean Dynamic Acceleration",
+                "motion": "Acceleration Axes",
+            },
+        },
+    )
+    widget = _FakeFigureWidget()
+    widget.data = ["keep"]
+
+    module.register_h10_renders(
+        _FakeInput(device="11", h10_chart="motion"),
+        {"11": _FakeValue({"heart_rate_bpm": 72.0, "rr_last_ms": 840.0})},
+        {"11": deque()},
+        {"11": _FakeValue({"samples_uv": [10, 20, 30], "sample_rate_hz": 130})},
+        {"11": deque([10, 20, 30])},
+        {"11": _FakeValue({"mean_dynamic_accel_mg": 18.0, "sample_rate_hz": 200})},
+        {"11": deque([(None, {"mean_dynamic_accel_mg": 18.0})])},
+        {"11": _FakeValue({"trail_points": [(0.0, 0.0, 1000.0), (12.0, -8.0, 990.0)]})},
+        lambda: "plotly_dark",
+        widget,
+        {"chart": "bpm", "dev": "11", "tpl": "plotly_dark"},
+    )
+
+    registry.effects["_update_h10_chart"]()
+
+    detail_html = registry.ui["h10_detail_view"]()
+    assert detail_html.count("<svg") == 3
+    assert detail_html.count("polyline") == 3
+    assert "X-Y" not in detail_html
+    assert "X-Z" not in detail_html
+    assert "Y-Z" not in detail_html
+    assert "+1500" in detail_html
+    assert "-1500" in detail_html
+    assert "Z: +990 mg" in detail_html
+    assert widget.data == ["keep"]
 
 
 def test_pulse_empty_history_leaves_existing_chart_unchanged(monkeypatch) -> None:

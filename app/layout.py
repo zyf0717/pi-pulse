@@ -6,6 +6,7 @@ from shinywidgets import output_widget
 from app.config import (
     ALL_DEVICES,
     ALL_DEVICES_DEFAULT,
+    H10_ACC_DYNAMIC_WINDOW_S,
     H10_CHARTS,
     PULSE_CHARTS,
     SEN66_CHARTS,
@@ -164,9 +165,12 @@ def _visual_card(
 
 def _sensor_tooltip(label: str, tooltip_id: str, *lines):
     tooltip_parts = [ui.span(f"{label} ", _INFO_ICON)]
-    for line in lines:
-        tooltip_parts.extend([line, ui.tags.br()])
-    tooltip_parts.pop()
+    if lines:
+        for line in lines:
+            tooltip_parts.extend([line, ui.tags.br()])
+        tooltip_parts.pop()
+    else:
+        tooltip_parts.append(label)
     return ui.tooltip(*tooltip_parts, placement="top", id=tooltip_id)
 
 
@@ -238,6 +242,25 @@ def _sen66_cards():
 
 
 def _h10_cards():
+    window_s = f"{H10_ACC_DYNAMIC_WINDOW_S:g}"
+    tooltip_map = {
+        "tooltip_h10_acc": _sensor_tooltip(
+            "Mean Dynamic Acceleration",
+            "tooltip_h10_acc",
+            f"Calculated over a {window_s} s window.",
+            "The app first estimates the average X/Y/Z acceleration in that window.",
+            "It then subtracts that average from each sample and averages the remaining magnitudes.",
+            "Higher values mean more movement during that window.",
+        ),
+        "tooltip_h10_tilt": _sensor_tooltip(
+            "Acceleration Axes",
+            "tooltip_h10_tilt",
+            "At rest, one axis is often near 1000 mg because gravity is about 1 g.",
+            "Which axis is near 1000 mg depends on how the strap is oriented.",
+            "The graphs show recent X-Y, X-Z, and Y-Z acceleration pairs over time.",
+            "In simple terms: they show which direction gravity and motion are pushing the sensor.",
+        ),
+    }
     cards = [
         _metric_card(
             title,
@@ -246,8 +269,26 @@ def _h10_cards():
             chart_target="h10_chart",
             chart_value=chart_value,
         )
-        for title, value_output_id, spark_output_id, chart_value in _H10_CARD_SPECS
+        for title, value_output_id, spark_output_id, chart_value in _H10_CARD_SPECS[:3]
     ]
+    _, acc_value_output_id, acc_spark_output_id, acc_chart_value = _H10_CARD_SPECS[3]
+    cards.append(
+        _metric_card(
+            tooltip_map["tooltip_h10_acc"],
+            acc_value_output_id,
+            acc_spark_output_id,
+            chart_target="h10_chart",
+            chart_value=acc_chart_value,
+        )
+    )
+    cards.append(
+        _visual_card(
+            tooltip_map["tooltip_h10_tilt"],
+            "h10_motion_preview",
+            chart_target="h10_chart",
+            chart_value="motion",
+        )
+    )
     return cards
 
 
@@ -295,7 +336,7 @@ def _h10_panel():
             H10_CHARTS,
             selected="bpm",
         ),
-        output_widget("h10_graph"),
+        ui.output_ui("h10_detail_view"),
     )
 
 

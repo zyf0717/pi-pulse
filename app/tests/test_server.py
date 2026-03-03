@@ -191,7 +191,7 @@ def test_server_wires_stream_tasks_and_registers_renders(monkeypatch) -> None:
         "http://h10-11/ecg",
         "http://h10-11/acc",
     ]
-    assert len(calls["create_task"]) == 7
+    assert len(calls["create_task"]) == 8
     assert len(calls["pulse_register"]) == 1
     assert len(calls["sen66_register"]) == 1
     assert len(calls["h10_register"]) == 1
@@ -207,7 +207,7 @@ def test_server_registers_session_cleanup_that_cancels_all_tasks(monkeypatch) ->
 
     session.ended_callback()
 
-    assert [task.cancel_calls for task in calls["create_task"]] == [1, 1, 1, 1, 1, 1, 1]
+    assert [task.cancel_calls for task in calls["create_task"]] == [1, 1, 1, 1, 1, 1, 1, 1]
 
 
 def test_server_initializes_chart_state_for_render_registration(monkeypatch) -> None:
@@ -224,8 +224,8 @@ def test_server_initializes_chart_state_for_render_registration(monkeypatch) -> 
     assert pulse_args[5] == {"chart": None, "dev": None, "tpl": None}
     assert isinstance(sen66_args[6], _FakeFigureWidget)
     assert sen66_args[7] == {"chart": None, "dev": None, "tpl": None}
-    assert isinstance(h10_args[8], _FakeFigureWidget)
-    assert h10_args[9] == {"chart": None, "dev": None, "tpl": None}
+    assert isinstance(h10_args[9], _FakeFigureWidget)
+    assert h10_args[10] == {"chart": None, "dev": None, "tpl": None}
     assert pulse_args[0].chart_style() == "plotly_dark"
     assert sen66_args[0].chart_style() == "plotly_dark"
     assert h10_args[0].chart_style() == "plotly_dark"

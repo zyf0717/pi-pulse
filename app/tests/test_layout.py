@@ -57,6 +57,7 @@ def _load_layout_module(monkeypatch):
     fake_config = ModuleType("app.config")
     fake_config.ALL_DEVICES = {"10": "10 (192.168.121.10)", "11": "11 (192.168.121.11)"}
     fake_config.ALL_DEVICES_DEFAULT = "11"
+    fake_config.H10_ACC_DYNAMIC_WINDOW_S = 0.5
     fake_config.PULSE_CHARTS = {
         "cpu": "CPU Usage (%)",
         "cpu_freq": "CPU Frequency (MHz)",
@@ -75,7 +76,8 @@ def _load_layout_module(monkeypatch):
         "bpm": "Heart Rate (BPM)",
         "rr": "Last RR Interval (ms)",
         "ecg": "ECG (µV)",
-        "acc_dyn": "Mean Dynamic Acceleration (mg)",
+        "acc_dyn": "Mean Dynamic Acceleration",
+        "motion": "Acceleration Axes",
     }
 
     monkeypatch.setitem(sys.modules, "shiny", fake_shiny)
@@ -155,14 +157,32 @@ def test_h10_cards_match_chart_mapping(monkeypatch) -> None:
 
     cards = module._h10_cards()
 
-    assert len(cards) == 4
-    assert [card["kwargs"]["data-chart-target"] for card in cards] == ["h10_chart"] * 4
+    assert len(cards) == 5
+    assert [card["kwargs"]["data-chart-target"] for card in cards] == ["h10_chart"] * 5
     assert [card["kwargs"]["data-chart-value"] for card in cards] == [
         "bpm",
         "rr",
         "ecg",
         "acc_dyn",
+        "motion",
     ]
+    first_header = cards[0]["args"][0]["args"][0]
+    assert first_header["tag"] == "card_header"
+    assert first_header["args"][0] == "Heart Rate"
+    accel_header = cards[3]["args"][0]["args"][0]
+    assert accel_header["args"][0]["tag"] == "tooltip"
+    assert "Calculated over a 0.5 s window." in accel_header["args"][0]["args"]
+    assert (
+        "It then subtracts that average from each sample and averages the remaining magnitudes."
+        in accel_header["args"][0]["args"]
+    )
+    tilt_header = cards[4]["args"][0]["args"][0]
+    assert tilt_header["args"][0]["tag"] == "tooltip"
+    assert tilt_header["args"][0]["args"][1] == "Acceleration Axes"
+    assert (
+        "At rest, one axis is often near 1000 mg because gravity is about 1 g."
+        in tilt_header["args"][0]["args"]
+    )
 
 
 def test_card_click_script_updates_existing_selects(monkeypatch) -> None:
