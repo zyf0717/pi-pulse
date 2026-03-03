@@ -12,6 +12,7 @@ dependencies:
   - fastapi
   - psutil
   - uvicorn
+  - pytest
   - pip:
     - shinyswatch
     - faicons

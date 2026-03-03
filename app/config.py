@@ -16,7 +16,7 @@ def _device_label(key: str) -> str:
     return f"{key} ({_IP_PREFIX}{key})"
 
 
-def build_settings(raw_config: Mapping[str, Mapping[str, Mapping[str, str]]]) -> dict:
+def build_settings(raw_config: Mapping) -> dict:
     pulse_config = raw_config.get("pi-pulse", {})
     sen66_config = raw_config.get("sen66", {})
     h10_config = raw_config.get("h10", {})
@@ -38,6 +38,7 @@ def build_settings(raw_config: Mapping[str, Mapping[str, Mapping[str, str]]]) ->
             "label": _device_label(key),
             "stream": value["stream"],
             "ecg_stream": value.get("ecg-stream"),
+            "acc_stream": value.get("acc-stream"),
         }
         for key, value in h10_config.items()
     }
@@ -65,6 +66,7 @@ H10_DEVICES = _SETTINGS["h10_devices"]
 H10_DEFAULT_DEV = _SETTINGS["h10_default_dev"]
 ALL_DEVICES = _SETTINGS["all_devices"]
 ALL_DEVICES_DEFAULT = _SETTINGS["all_devices_default"]
+H10_ACC_DYNAMIC_WINDOW_S = 1.0
 
 PULSE_CHARTS = {
     "cpu": "CPU Usage (%)",
@@ -86,4 +88,5 @@ H10_CHARTS = {
     "bpm": "Heart Rate (BPM)",
     "rr": "Last RR Interval (ms)",
     "ecg": "ECG (µV)",
+    "acc_dyn": "Mean Dynamic Acceleration (mg)",
 }

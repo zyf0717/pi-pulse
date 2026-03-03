@@ -94,6 +94,7 @@ _H10_CARD_SPECS = [
     ("Heart Rate", "h10_bpm_val", "h10_bpm_spark", "bpm"),
     ("RR Interval", "h10_rr_last_val", "h10_rr_last_spark", "rr"),
     ("ECG", "h10_ecg_val", "h10_ecg_spark", "ecg"),
+    ("Mean Dynamic Acceleration", "h10_acc_val", "h10_acc_spark", "acc_dyn"),
 ]
 
 

@@ -33,9 +33,11 @@ def test_h10_devices_match_checked_in_config() -> None:
             "label": "11 (192.168.121.11)",
             "stream": "http://192.168.121.11:8003/stream",
             "ecg_stream": "http://192.168.121.11:8003/ecg-stream",
+            "acc_stream": "http://192.168.121.11:8003/acc-stream",
         }
     }
     assert config.H10_DEFAULT_DEV == "11"
+    assert config.H10_ACC_DYNAMIC_WINDOW_S == 0.5
 
 
 def test_all_devices_and_defaults_match_current_config() -> None:
@@ -51,12 +53,13 @@ def test_chart_option_mappings_are_stable() -> None:
     assert config.SEN66_CHARTS["pm_nc"] == "PM Number Concentration (#/cm³)"
     assert config.H10_CHARTS["rr"] == "Last RR Interval (ms)"
     assert config.H10_CHARTS["ecg"] == "ECG (µV)"
+    assert config.H10_CHARTS["acc_dyn"] == "Mean Dynamic Acceleration (mg)"
 
 
 def test_load_raw_config_reads_explicit_path(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        'pi-pulse:\n  "12":\n    stream: http://example/pulse\nsen66:\n  "12":\n    stream: http://example/sen66\n    nc-stream: http://example/sen66/nc\nh10:\n  "12":\n    stream: http://example/h10\n    ecg-stream: http://example/h10/ecg\n',
+        'pi-pulse:\n  "12":\n    stream: http://example/pulse\nsen66:\n  "12":\n    stream: http://example/sen66\n    nc-stream: http://example/sen66/nc\nh10:\n  "12":\n    stream: http://example/h10\n    ecg-stream: http://example/h10/ecg\n    acc-stream: http://example/h10/acc\n',
         encoding="utf-8",
     )
 
@@ -66,6 +69,7 @@ def test_load_raw_config_reads_explicit_path(tmp_path: Path) -> None:
     assert loaded["sen66"]["12"]["nc-stream"] == "http://example/sen66/nc"
     assert loaded["h10"]["12"]["stream"] == "http://example/h10"
     assert loaded["h10"]["12"]["ecg-stream"] == "http://example/h10/ecg"
+    assert loaded["h10"]["12"]["acc-stream"] == "http://example/h10/acc"
 
 
 def test_build_settings_shapes_device_maps_and_preserves_current_default_behavior() -> (
@@ -84,6 +88,7 @@ def test_build_settings_shapes_device_maps_and_preserves_current_default_behavio
                 "12": {
                     "stream": "http://example/h10",
                     "ecg-stream": "http://example/h10/ecg",
+                    "acc-stream": "http://example/h10/acc",
                 }
             },
         }
@@ -105,6 +110,7 @@ def test_build_settings_shapes_device_maps_and_preserves_current_default_behavio
             "label": "12 (192.168.121.12)",
             "stream": "http://example/h10",
             "ecg_stream": "http://example/h10/ecg",
+            "acc_stream": "http://example/h10/acc",
         }
     }
     assert settings["h10_default_dev"] == "12"

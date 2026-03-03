@@ -1,4 +1,5 @@
 import asyncio
+import math
 import time
 from collections import deque
 from datetime import datetime
@@ -7,7 +8,7 @@ import plotly.graph_objects as go
 import shinyswatch
 from shiny import reactive
 
-from app.config import DEVICES, H10_DEVICES, SEN66_DEVICES
+from app.config import DEVICES, H10_ACC_DYNAMIC_WINDOW_S, H10_DEVICES, SEN66_DEVICES
 from app.renders.h10 import register_h10_renders
 from app.renders.pulse import register_pulse_renders
 from app.renders.sen66 import register_sen66_renders
@@ -87,6 +88,61 @@ def _normalize_h10_ecg_chunk(data: dict) -> dict:
     }
 
 
+def _normalize_h10_acc_chunk(data: dict) -> dict:
+    sample_rate = data.get("sample_rate_hz", 200)
+    if not isinstance(sample_rate, int) or isinstance(sample_rate, bool) or sample_rate <= 0:
+        sample_rate = 200
+
+    samples = data.get("samples_mg", [])
+    if not isinstance(samples, list):
+        samples = []
+
+    normalized_samples = []
+    for sample in samples:
+        if not isinstance(sample, dict):
+            continue
+        x_mg = sample.get("x_mg")
+        y_mg = sample.get("y_mg")
+        z_mg = sample.get("z_mg")
+        if any(
+            not isinstance(value, (int, float)) or isinstance(value, bool)
+            for value in (x_mg, y_mg, z_mg)
+        ):
+            continue
+        normalized_samples.append(
+            {
+                "x_mg": float(x_mg),
+                "y_mg": float(y_mg),
+                "z_mg": float(z_mg),
+            }
+        )
+
+    return {
+        "samples_mg": normalized_samples,
+        "sample_rate_hz": sample_rate,
+    }
+
+
+def _mean_dynamic_acceleration_mg(samples_mg: list[dict]) -> float:
+    if not samples_mg:
+        return 0.0
+
+    sample_count = len(samples_mg)
+    mean_x = sum(sample["x_mg"] for sample in samples_mg) / sample_count
+    mean_y = sum(sample["y_mg"] for sample in samples_mg) / sample_count
+    mean_z = sum(sample["z_mg"] for sample in samples_mg) / sample_count
+
+    dynamic_magnitudes = [
+        math.sqrt(
+            (sample["x_mg"] - mean_x) ** 2
+            + (sample["y_mg"] - mean_y) ** 2
+            + (sample["z_mg"] - mean_z) ** 2
+        )
+        for sample in samples_mg
+    ]
+    return sum(dynamic_magnitudes) / sample_count
+
+
 def server(input, output, session):
     shinyswatch.theme_picker_server()
     _h10_ecg_frame_s = 1 / 30
@@ -163,6 +219,16 @@ def server(input, output, session):
     h10_ecg_sample_rate: dict[str, int] = {k: 130 for k in H10_DEVICES}
     h10_ecg_buffer_until: dict[str, float | None] = {k: None for k in H10_DEVICES}
     h10_ecg_fractional: dict[str, float] = {k: 0.0 for k in H10_DEVICES}
+    _h10_acc_default = {
+        "mean_dynamic_accel_mg": 0.0,
+        "sample_rate_hz": 200,
+    }
+    h10_acc_latest: dict[str, reactive.Value] = {
+        k: reactive.Value(dict(_h10_acc_default)) for k in H10_DEVICES
+    }
+    h10_acc_history: dict[str, deque] = {k: deque(maxlen=60) for k in H10_DEVICES}
+    h10_acc_pending: dict[str, deque] = {k: deque() for k in H10_DEVICES}
+    h10_acc_sample_rate: dict[str, int] = {k: 200 for k in H10_DEVICES}
 
     # ── SSE callbacks ─────────────────────────────────────────────────────────
     async def on_pulse(key: str, data: dict):
@@ -190,6 +256,23 @@ def server(input, output, session):
         if was_idle:
             h10_ecg_buffer_until[key] = time.monotonic() + _h10_ecg_buffer_s
             h10_ecg_fractional[key] = 0.0
+
+    async def on_h10_acc(key: str, data: dict):
+        normalized = _normalize_h10_acc_chunk(data)
+        h10_acc_pending[key].extend(normalized["samples_mg"])
+        h10_acc_sample_rate[key] = normalized["sample_rate_hz"]
+
+        window_size = max(1, int(round(h10_acc_sample_rate[key] * H10_ACC_DYNAMIC_WINDOW_S)))
+        while len(h10_acc_pending[key]) >= window_size:
+            second_samples = [
+                h10_acc_pending[key].popleft() for _ in range(window_size)
+            ]
+            aggregated = {
+                "mean_dynamic_accel_mg": _mean_dynamic_acceleration_mg(second_samples),
+                "sample_rate_hz": h10_acc_sample_rate[key],
+            }
+            h10_acc_history[key].append((datetime.now(), aggregated))
+            h10_acc_latest[key].set(aggregated)
 
     async def pump_h10_ecg(key: str):
         last_tick = time.monotonic()
@@ -274,6 +357,17 @@ def server(input, output, session):
             for k, v in H10_DEVICES.items()
             if v.get("ecg_stream")
         ]
+        + [
+            asyncio.create_task(
+                stream_consumer(
+                    f"h10-acc-{k}",
+                    v["acc_stream"],
+                    lambda d, k=k: on_h10_acc(k, d),
+                )
+            )
+            for k, v in H10_DEVICES.items()
+            if v.get("acc_stream")
+        ]
         + [asyncio.create_task(pump_h10_ecg(k)) for k in H10_DEVICES]
     )
     session.on_ended(lambda: [t.cancel() for t in tasks])
@@ -306,6 +400,8 @@ def server(input, output, session):
         h10_history,
         h10_ecg_latest,
         h10_ecg_samples,
+        h10_acc_latest,
+        h10_acc_history,
         plotly_tpl,
         h10_widget,
         h10_state,
