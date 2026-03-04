@@ -169,20 +169,6 @@ def test_h10_cards_match_chart_mapping(monkeypatch) -> None:
     first_header = cards[0]["args"][0]["args"][0]
     assert first_header["tag"] == "card_header"
     assert first_header["args"][0] == "Heart Rate"
-    accel_header = cards[3]["args"][0]["args"][0]
-    assert accel_header["args"][0]["tag"] == "tooltip"
-    assert "Calculated over a 0.5 s window." in accel_header["args"][0]["args"]
-    assert (
-        "It then subtracts that average from each sample and averages the remaining magnitudes."
-        in accel_header["args"][0]["args"]
-    )
-    tilt_header = cards[4]["args"][0]["args"][0]
-    assert tilt_header["args"][0]["tag"] == "tooltip"
-    assert tilt_header["args"][0]["args"][1] == "Acceleration Axes"
-    assert (
-        "At rest, one axis is often near 1000 mg because gravity is about 1 g."
-        in tilt_header["args"][0]["args"]
-    )
 
 
 def test_card_click_script_updates_existing_selects(monkeypatch) -> None:

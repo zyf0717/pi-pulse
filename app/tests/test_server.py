@@ -191,7 +191,7 @@ def test_server_wires_stream_tasks_and_registers_renders(monkeypatch) -> None:
         "http://h10-11/ecg",
         "http://h10-11/acc",
     ]
-    assert len(calls["create_task"]) == 8
+    assert len(calls["create_task"]) == 7
     assert len(calls["pulse_register"]) == 1
     assert len(calls["sen66_register"]) == 1
     assert len(calls["h10_register"]) == 1
@@ -207,7 +207,7 @@ def test_server_registers_session_cleanup_that_cancels_all_tasks(monkeypatch) ->
 
     session.ended_callback()
 
-    assert [task.cancel_calls for task in calls["create_task"]] == [1, 1, 1, 1, 1, 1, 1, 1]
+    assert [task.cancel_calls for task in calls["create_task"]] == [1, 1, 1, 1, 1, 1, 1]
 
 
 def test_server_initializes_chart_state_for_render_registration(monkeypatch) -> None:
@@ -294,3 +294,46 @@ def test_mean_dynamic_acceleration_uses_window_mean_as_static_component(
     )
 
     assert mean_dynamic == 1.0
+
+
+def test_enqueue_ecg_samples_uses_monotonic_logical_timestamps(monkeypatch) -> None:
+    server_module, _ = _load_server_module(monkeypatch)
+
+    queue = server_module.deque()
+    last_stamp = server_module._enqueue_ecg_samples(
+        queue,
+        [10, 20, 30],
+        arrival_time=100.0,
+        sample_rate_hz=130,
+    )
+
+    interval = 1.0 / 130
+    assert len(queue) == 3
+    assert queue[0] == (100.0, 10)
+    assert queue[1] == (100.0 + interval, 20)
+    assert queue[2] == (100.0 + (2 * interval), 30)
+    assert last_stamp == 100.0 + (2 * interval)
+
+
+def test_drain_ready_ecg_samples_returns_all_points_older_than_playout_delay(
+    monkeypatch,
+) -> None:
+    server_module, _ = _load_server_module(monkeypatch)
+
+    queue = server_module.deque(
+        [
+            (10.00, 1),
+            (10.01, 2),
+            (10.02, 3),
+            (10.60, 4),
+        ]
+    )
+
+    drained = server_module._drain_ready_ecg_samples(
+        queue,
+        now=10.52,
+        playout_delay_s=0.5,
+    )
+
+    assert drained == [1, 2, 3]
+    assert list(queue) == [(10.60, 4)]
