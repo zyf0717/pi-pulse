@@ -15,7 +15,7 @@ from bleak import BleakClient, BleakError, BleakScanner
 
 log = logging.getLogger(__name__)
 
-H10_ADDRESS = "AA:BB:CC:DD:EE:01"
+H10_ADDRESS: dict[str, str] = {"6FFF5628": "AA:BB:CC:DD:EE:01"}
 
 # Standard Bluetooth Heart Rate Measurement characteristic
 HR_MEASUREMENT_UUID = "00002a37-0000-1000-8000-00805f9b34fb"
@@ -241,7 +241,7 @@ async def ble_connect_loop(
     Parameters
     ----------
     address:
-        Bluetooth address of the target device (e.g. ``H10_ADDRESS``).
+        Bluetooth address of the target device (e.g. ``H10_ADDRESS["6FFF5628"]``).
     stop_event:
         Set this event from outside to request a clean shutdown.
     on_connect:
