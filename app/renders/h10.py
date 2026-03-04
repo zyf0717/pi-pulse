@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 from shiny import reactive, render, ui
 from shinywidgets import output_widget, render_widget
 
-from app.config import H10_CHARTS, H10_DEVICES
+from app.config import H10_CHARTS, H10_DEFAULTS, H10_DEVICE_OPTIONS, H10_DEVICES
 from app.renders.render_utils import (
     metric_value,
     needs_chart_rebuild,
@@ -192,17 +192,38 @@ def _motion_detail_row_svg(trail_points: list[tuple[float, ...]]) -> str:
 
 
 def _h10_spark(
-    device: str,
+    stream_key: str | None,
     latest_map: dict[str, reactive.Value],
     history_map: dict[str, deque],
     field: str,
     *,
     fmt=None,
 ):
-    values = sparkline_values(device, H10_DEVICES, latest_map, history_map, field)
+    if stream_key is None:
+        return ui.HTML("")
+    values = sparkline_values(stream_key, H10_DEVICES, latest_map, history_map, field)
     if values is None:
         return ui.HTML("")
     return sparkline(values, fmt=fmt) if fmt else sparkline(values)
+
+
+def _selected_h10_stream(input) -> str | None:
+    node_key = input.device()
+    options = H10_DEVICE_OPTIONS.get(node_key, {})
+    if not options:
+        return None
+    if len(options) == 1:
+        return next(iter(options))
+
+    selected_input = getattr(input, "h10_device", None)
+    try:
+        selected = selected_input() if callable(selected_input) else None
+    except Exception:
+        selected = None
+    if selected in options:
+        return selected
+
+    return H10_DEFAULTS.get(node_key) or next(iter(options), None)
 
 
 def _reset_h10_chart(h10_widget: go.FigureWidget, h10_state: dict) -> None:
@@ -311,10 +332,27 @@ def register_h10_renders(
 ) -> None:
     """Register all H10-tab output renders inside the active Shiny session."""
 
+    @render.ui
+    def h10_device_selector():
+        node_key = input.device()
+        options = H10_DEVICE_OPTIONS.get(node_key, {})
+        if not options:
+            return ui.HTML("")
+        selected = _selected_h10_stream(input)
+        return ui.input_select(
+            "h10_device",
+            "H10 stream:",
+            options,
+            selected=selected,
+        )
+
     @render.text
     def h10_bpm_val():
+        stream_key = _selected_h10_stream(input)
+        if stream_key is None:
+            return "N/A"
         return metric_value(
-            input.device(),
+            stream_key,
             H10_DEVICES,
             h10_latest,
             "heart_rate_bpm",
@@ -323,8 +361,11 @@ def register_h10_renders(
 
     @render.text
     def h10_rr_last_val():
+        stream_key = _selected_h10_stream(input)
+        if stream_key is None:
+            return "N/A"
         return metric_value(
-            input.device(),
+            stream_key,
             H10_DEVICES,
             h10_latest,
             "rr_last_ms",
@@ -333,19 +374,22 @@ def register_h10_renders(
 
     @render.text
     def h10_ecg_val():
-        dev = input.device()
-        if dev not in H10_DEVICES:
+        stream_key = _selected_h10_stream(input)
+        if stream_key is None:
             return "N/A"
-        ecg_chunk = h10_ecg_latest[dev]()
-        if not h10_ecg_samples[dev]:
+        ecg_chunk = h10_ecg_latest[stream_key]()
+        if not h10_ecg_samples[stream_key]:
             return "N/A"
         sample_rate_hz = ecg_chunk.get("sample_rate_hz", 130)
         return f"{sample_rate_hz:.0f} Hz"
 
     @render.text
     def h10_acc_val():
+        stream_key = _selected_h10_stream(input)
+        if stream_key is None:
+            return "N/A"
         return metric_value(
-            input.device(),
+            stream_key,
             H10_DEVICES,
             h10_acc_latest,
             "mean_dynamic_accel_mg",
@@ -355,7 +399,7 @@ def register_h10_renders(
     @render.ui
     def h10_bpm_spark():
         return _h10_spark(
-            input.device(),
+            _selected_h10_stream(input),
             h10_latest,
             h10_history,
             "heart_rate_bpm",
@@ -365,7 +409,7 @@ def register_h10_renders(
     @render.ui
     def h10_rr_last_spark():
         return _h10_spark(
-            input.device(),
+            _selected_h10_stream(input),
             h10_latest,
             h10_history,
             "rr_last_ms",
@@ -375,7 +419,7 @@ def register_h10_renders(
     @render.ui
     def h10_acc_spark():
         return _h10_spark(
-            input.device(),
+            _selected_h10_stream(input),
             h10_acc_latest,
             h10_acc_history,
             "mean_dynamic_accel_mg",
@@ -384,21 +428,21 @@ def register_h10_renders(
 
     @render.ui
     def h10_ecg_spark():
-        dev = input.device()
-        if dev not in H10_DEVICES:
+        stream_key = _selected_h10_stream(input)
+        if stream_key is None:
             return ui.HTML("")
-        h10_ecg_latest[dev]()  # establish reactive dependency
-        samples = list(h10_ecg_samples[dev])
+        h10_ecg_latest[stream_key]()  # establish reactive dependency
+        samples = list(h10_ecg_samples[stream_key])
         if not samples:
             return ui.HTML("")
         return sparkline(samples, fmt=lambda v: f"{v:.0f} µV")
 
     @render.ui
     def h10_motion_preview():
-        dev = input.device()
-        if dev not in H10_DEVICES:
+        stream_key = _selected_h10_stream(input)
+        if stream_key is None:
             return ui.HTML("")
-        frame = h10_motion_latest[dev]()
+        frame = h10_motion_latest[stream_key]()
         return ui.HTML(
             _motion_plane_svg(
                 frame.get("trail_points", []),
@@ -410,21 +454,21 @@ def register_h10_renders(
 
     @render.ui
     def h10_detail_view():
-        dev = input.device()
+        stream_key = _selected_h10_stream(input)
         if input.h10_chart() == "motion":
-            if dev not in H10_DEVICES:
+            if stream_key is None:
                 return ui.HTML("")
-            frame = h10_motion_latest[dev]()
+            frame = h10_motion_latest[stream_key]()
             return ui.HTML(_motion_detail_row_svg(frame.get("trail_points", [])))
         return output_widget("h10_graph")
 
     @reactive.Effect
     def _update_h10_chart():
-        dev = input.device()
+        stream_key = _selected_h10_stream(input)
         chart = input.h10_chart()
         tpl = plotly_tpl()
 
-        if dev not in H10_DEVICES:
+        if stream_key is None:
             _reset_h10_chart(h10_widget, h10_state)
             return
 
@@ -432,8 +476,8 @@ def register_h10_renders(
             return
 
         if chart == "ecg":
-            ecg_chunk = h10_ecg_latest[dev]()
-            samples = list(h10_ecg_samples[dev])
+            ecg_chunk = h10_ecg_latest[stream_key]()
+            samples = list(h10_ecg_samples[stream_key])
             if not samples:
                 _reset_h10_chart(h10_widget, h10_state)
                 return
@@ -447,21 +491,21 @@ def register_h10_renders(
                 )
             ]
         elif chart == "acc_dyn":
-            h10_acc_latest[dev]()
-            history = list(h10_acc_history[dev])
+            h10_acc_latest[stream_key]()
+            history = list(h10_acc_history[stream_key])
         else:
-            h10_latest[dev]()
-            history = list(h10_history[dev])
+            h10_latest[stream_key]()
+            history = list(h10_history[stream_key])
         if not history:
             return
 
         times = [t for t, _ in history]
         data_rows = [d for _, d in history]
-        rebuild = needs_chart_rebuild(h10_state, chart, dev, tpl)
+        rebuild = needs_chart_rebuild(h10_state, chart, stream_key, tpl)
         with h10_widget.batch_update():
             if rebuild:
                 _rebuild_h10_chart(
-                    h10_widget, h10_state, chart, dev, tpl, times, data_rows
+                    h10_widget, h10_state, chart, stream_key, tpl, times, data_rows
                 )
             else:
                 _update_h10_chart_data(h10_widget, chart, times, data_rows)
