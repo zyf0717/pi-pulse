@@ -171,17 +171,29 @@ def test_h10_cards_match_chart_mapping(monkeypatch) -> None:
     assert first_header["args"][0] == "Heart Rate"
     accel_header = cards[3]["args"][0]["args"][0]
     assert accel_header["args"][0]["tag"] == "tooltip"
-    assert "Calculated over a 0.5 s window." in accel_header["args"][0]["args"]
-    assert (
-        "It then subtracts that average from each sample and averages the remaining magnitudes."
-        in accel_header["args"][0]["args"]
-    )
+    assert "Average movement over the last 0.5 s." in accel_header["args"][0]["args"]
+    assert "Baseline tilt/gravity is removed first." in accel_header["args"][0]["args"]
+    assert "Higher values mean more motion during that window." in accel_header["args"][0]["args"]
     tilt_header = cards[4]["args"][0]["args"][0]
     assert tilt_header["args"][0]["tag"] == "tooltip"
-    assert tilt_header["args"][0]["args"][1] == "Acceleration Axes"
+    assert tilt_header["args"][0]["args"][0]["tag"] == "span"
+    assert tilt_header["args"][0]["args"][0]["args"][0] == "Acceleration Axes "
     assert (
-        "At rest, one axis is often near 1000 mg because gravity is about 1 g."
+        "At rest, the combined X/Y/Z acceleration is usually ~1000 mg because of gravity (1g ≈ 9.81 m/s²)."
         in tilt_header["args"][0]["args"]
+    )
+
+
+def test_h10_panel_includes_stream_selector_placeholder(monkeypatch) -> None:
+    module = _load_layout_module(monkeypatch)
+
+    panel = module._h10_panel()
+
+    assert panel["tag"] == "nav_panel"
+    assert any(
+        item["tag"] == "output_ui" and item["args"] == ("h10_device_selector",)
+        for item in panel["args"]
+        if isinstance(item, dict)
     )
 
 

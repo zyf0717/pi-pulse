@@ -42,8 +42,10 @@ def _load_server_module(monkeypatch):
         }
     }
     fake_config.H10_DEVICES = {
-        "11": {
-            "label": "11 (192.168.121.11)",
+        "11:6FFF5628": {
+            "label": "6FFF5628",
+            "device": "11",
+            "h10_id": "6FFF5628",
             "stream": "http://h10-11",
             "ecg_stream": "http://h10-11/ecg",
             "acc_stream": "http://h10-11/acc",
@@ -179,9 +181,9 @@ def test_server_wires_stream_tasks_and_registers_renders(monkeypatch) -> None:
         "pulse-10",
         "sen66-11",
         "sen66-nc-11",
-        "h10-11",
-        "h10-ecg-11",
-        "h10-acc-11",
+        "h10-11:6FFF5628",
+        "h10-ecg-11:6FFF5628",
+        "h10-acc-11:6FFF5628",
     ]
     assert [call["url"] for call in calls["stream_consumer"]] == [
         "http://pulse-10",
@@ -191,7 +193,7 @@ def test_server_wires_stream_tasks_and_registers_renders(monkeypatch) -> None:
         "http://h10-11/ecg",
         "http://h10-11/acc",
     ]
-    assert len(calls["create_task"]) == 8
+    assert len(calls["create_task"]) == 6
     assert len(calls["pulse_register"]) == 1
     assert len(calls["sen66_register"]) == 1
     assert len(calls["h10_register"]) == 1
@@ -207,7 +209,7 @@ def test_server_registers_session_cleanup_that_cancels_all_tasks(monkeypatch) ->
 
     session.ended_callback()
 
-    assert [task.cancel_calls for task in calls["create_task"]] == [1, 1, 1, 1, 1, 1, 1, 1]
+    assert [task.cancel_calls for task in calls["create_task"]] == [1, 1, 1, 1, 1, 1]
 
 
 def test_server_initializes_chart_state_for_render_registration(monkeypatch) -> None:

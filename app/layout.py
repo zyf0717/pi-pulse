@@ -329,6 +329,7 @@ def _h10_panel():
         ui.br(),
         ui.layout_column_wrap(*_h10_cards(), fill=False),
         ui.hr(),
+        ui.output_ui("h10_device_selector"),
         ui.input_select(
             "h10_chart",
             "",

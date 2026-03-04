@@ -60,17 +60,22 @@ class _FakeInput:
         self,
         *,
         device: str,
+        h10_device: str | None = None,
         pulse_chart: str = "temp",
         sen66_chart: str = "co2",
         h10_chart: str = "bpm",
     ):
         self._device = device
+        self._h10_device = h10_device
         self._pulse_chart = pulse_chart
         self._sen66_chart = sen66_chart
         self._h10_chart = h10_chart
 
     def device(self) -> str:
         return self._device
+
+    def h10_device(self) -> str | None:
+        return self._h10_device
 
     def pulse_chart(self) -> str:
         return self._pulse_chart
@@ -114,10 +119,44 @@ class _FakeFigureWidget:
 def _load_render_module(monkeypatch, filename: str, config_attrs: dict):
     registry = _Registry()
 
+    if "H10_DEVICES" in config_attrs:
+        h10_devices = config_attrs["H10_DEVICES"]
+        if "H10_DEVICE_OPTIONS" not in config_attrs:
+            options: dict[str, dict[str, str]] = {}
+            defaults: dict[str, str] = {}
+            for stream_key, entry in h10_devices.items():
+                node_key = entry.get("device")
+                if not node_key:
+                    node_key = (
+                        stream_key.split(":", 1)[0]
+                        if ":" in stream_key
+                        else str(stream_key)
+                    )
+                label = entry.get("label", str(stream_key))
+                options.setdefault(node_key, {})[stream_key] = label
+                defaults.setdefault(node_key, stream_key)
+            config_attrs = dict(config_attrs)
+            config_attrs["H10_DEVICE_OPTIONS"] = options
+            config_attrs["H10_DEFAULTS"] = defaults
+        elif "H10_DEFAULTS" not in config_attrs:
+            defaults = {
+                node_key: next(iter(options), None)
+                for node_key, options in config_attrs["H10_DEVICE_OPTIONS"].items()
+            }
+            config_attrs = dict(config_attrs)
+            config_attrs["H10_DEFAULTS"] = defaults
+
     fake_shiny = ModuleType("shiny")
     fake_shiny.reactive = _FakeReactive(registry)
     fake_shiny.render = _FakeRender(registry)
-    fake_shiny.ui = SimpleNamespace(HTML=lambda value: value)
+    fake_shiny.ui = SimpleNamespace(
+        HTML=lambda value: value,
+        input_select=lambda *args, **kwargs: {
+            "tag": "input_select",
+            "args": args,
+            "kwargs": kwargs,
+        },
+    )
 
     fake_shinywidgets = ModuleType("shinywidgets")
 
@@ -340,6 +379,112 @@ def test_h10_value_boxes_format_current_snapshot(monkeypatch) -> None:
     assert "+1500" not in motion_preview
     assert "10 mg" not in motion_preview
     assert registry.ui["h10_detail_view"]() == {"tag": "output_widget", "id": "h10_graph"}
+    selector = registry.ui["h10_device_selector"]()
+    assert selector["tag"] == "input_select"
+    assert selector["args"][0] == "h10_device"
+    assert selector["args"][2] == {"11": "11 (192.168.121.11)"}
+
+
+def test_h10_selector_is_rendered_for_nodes_with_multiple_streams(monkeypatch) -> None:
+    module, registry = _load_render_module(
+        monkeypatch,
+        "h10.py",
+        {
+            "H10_DEVICES": {
+                "11:strap-a": {
+                    "label": "Chest A",
+                    "device": "11",
+                    "stream": "http://h10-11/a",
+                },
+                "11:strap-b": {
+                    "label": "Chest B",
+                    "device": "11",
+                    "stream": "http://h10-11/b",
+                },
+            },
+            "H10_DEVICE_OPTIONS": {
+                "11": {
+                    "11:strap-a": "Chest A",
+                    "11:strap-b": "Chest B",
+                }
+            },
+            "H10_DEFAULTS": {"11": "11:strap-a"},
+            "H10_CHARTS": {
+                "bpm": "Heart Rate (BPM)",
+                "rr": "Last RR Interval (ms)",
+                "ecg": "ECG (µV)",
+                "acc_dyn": "Mean Dynamic Acceleration",
+                "motion": "Acceleration Axes",
+            },
+        },
+    )
+    module.register_h10_renders(
+        _FakeInput(device="11", h10_device="11:strap-b"),
+        {
+            "11:strap-a": _FakeValue({"heart_rate_bpm": 72.0}),
+            "11:strap-b": _FakeValue({"heart_rate_bpm": 81.0}),
+        },
+        {"11:strap-a": deque(), "11:strap-b": deque()},
+        {
+            "11:strap-a": _FakeValue({"samples_uv": [], "sample_rate_hz": 130}),
+            "11:strap-b": _FakeValue({"samples_uv": [], "sample_rate_hz": 130}),
+        },
+        {"11:strap-a": deque(), "11:strap-b": deque()},
+        {
+            "11:strap-a": _FakeValue({"mean_dynamic_accel_mg": 0.0, "sample_rate_hz": 200}),
+            "11:strap-b": _FakeValue({"mean_dynamic_accel_mg": 0.0, "sample_rate_hz": 200}),
+        },
+        {"11:strap-a": deque(), "11:strap-b": deque()},
+        {
+            "11:strap-a": _FakeValue({"trail_points": []}),
+            "11:strap-b": _FakeValue({"trail_points": []}),
+        },
+        lambda: "plotly_dark",
+        _FakeFigureWidget(),
+        {"chart": None, "dev": None, "tpl": None},
+    )
+
+    selector = registry.ui["h10_device_selector"]()
+
+    assert selector["tag"] == "input_select"
+    assert selector["args"][0] == "h10_device"
+    assert selector["args"][1] == "H10 stream:"
+    assert selector["args"][2] == {"11:strap-a": "Chest A", "11:strap-b": "Chest B"}
+    assert selector["kwargs"]["selected"] == "11:strap-b"
+    assert registry.text["h10_bpm_val"]() == "81 bpm"
+
+
+def test_h10_single_stream_does_not_require_dynamic_selector_input(monkeypatch) -> None:
+    module, _ = _load_render_module(
+        monkeypatch,
+        "h10.py",
+        {
+            "H10_DEVICES": {
+                "11:strap-a": {
+                    "label": "Chest A",
+                    "device": "11",
+                    "stream": "http://h10-11/a",
+                }
+            },
+            "H10_DEVICE_OPTIONS": {
+                "11": {
+                    "11:strap-a": "Chest A",
+                }
+            },
+            "H10_DEFAULTS": {"11": "11:strap-a"},
+            "H10_CHARTS": {
+                "bpm": "Heart Rate (BPM)",
+                "rr": "Last RR Interval (ms)",
+                "ecg": "ECG (µV)",
+                "acc_dyn": "Mean Dynamic Acceleration",
+                "motion": "Acceleration Axes",
+            },
+        },
+    )
+
+    input_obj = SimpleNamespace(device=lambda: "11")
+
+    assert module._selected_h10_stream(input_obj) == "11:strap-a"
 
 
 def test_h10_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> None:
