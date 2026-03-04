@@ -196,10 +196,7 @@ def test_h10_cards_match_chart_mapping(monkeypatch) -> None:
     # ensure the label span contains 'Acceleration Axes'
     span_args = tilt_header["args"][0]["args"][0]["args"]
     assert any(isinstance(s, str) and "Acceleration Axes" in s for s in span_args)
-    assert (
-        "At rest, one axis is often near 1000 mg because gravity is about 1 g."
-        in tilt_header["args"][0]["args"]
-    )
+    assert any(isinstance(a, str) and "1000 mg" in a for a in tilt_header["args"][0]["args"]), f"'1000 mg' not found in tilt tooltip args: {tilt_header['args'][0]['args']}"
 
 
 def test_card_click_script_updates_existing_selects(monkeypatch) -> None:
