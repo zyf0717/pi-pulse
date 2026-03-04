@@ -3,18 +3,19 @@ Polar H10 BLE -> Server-Sent Events service.
 
 Endpoints
 ---------
-GET /health       – liveness probe
-GET /stream       – heart-rate (bpm) + RR intervals (ms)
-GET /ecg-stream   – ECG samples (uV) at 130 Hz, batched per PMD packet
-GET /acc-stream   – accelerometer samples (mG) at 200 Hz, batched per PMD packet
+GET /h10/{device_id}/health       – liveness probe for one configured H10
+GET /h10/{device_id}/stream       – heart-rate (bpm) + RR intervals (ms)
+GET /h10/{device_id}/ecg-stream   – ECG samples (uV) at 130 Hz, batched per PMD packet
+GET /h10/{device_id}/acc-stream   – accelerometer samples (mG) at 200 Hz, batched per PMD packet
 """
 
 import asyncio
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from typing import Optional
 
 from bleak import BleakClient
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 try:
     from h10_protocol import (
@@ -55,18 +56,22 @@ except ImportError:
     )
     from rpi4.sse import queue_stream, sse_response
 
-# Latest parsed reading; written by the BLE callback, read by /health.
-_latest: dict = {}
+@dataclass
+class DeviceState:
+    address: str
+    latest: dict = field(default_factory=dict)
+    subscribers: list[asyncio.Queue] = field(default_factory=list)
+    subscribers_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    ecg_subscribers: list[asyncio.Queue] = field(default_factory=list)
+    ecg_subscribers_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    acc_subscribers: list[asyncio.Queue] = field(default_factory=list)
+    acc_subscribers_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
-# Each SSE client gets its own subscriber queue.
-_subscribers: list[asyncio.Queue] = []
-_subscribers_lock = asyncio.Lock()
 
-_ecg_subscribers: list[asyncio.Queue] = []
-_ecg_subscribers_lock = asyncio.Lock()
-
-_acc_subscribers: list[asyncio.Queue] = []
-_acc_subscribers_lock = asyncio.Lock()
+_DEVICE_STATES: dict[str, DeviceState] = {
+    device_id: DeviceState(address=address)
+    for device_id, address in H10_ADDRESS.items()
+}
 
 
 def _broadcast(subscribers: list[asyncio.Queue], payload: dict) -> None:
@@ -77,15 +82,21 @@ def _broadcast(subscribers: list[asyncio.Queue], payload: dict) -> None:
             pass
 
 
-async def ble_loop(stop_event: asyncio.Event) -> None:
-    """Connect to the H10, stream HR/ECG/ACC, and fan out payloads to SSE queues."""
-    global _latest
+def _device_state(device_id: str) -> DeviceState:
+    state = _DEVICE_STATES.get(device_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"Unknown H10 device: {device_id}")
+    return state
+
+
+async def ble_loop(device_id: str, address: str, stop_event: asyncio.Event) -> None:
+    """Connect to one H10, stream HR/ECG/ACC, and fan out payloads to SSE queues."""
+    state = _DEVICE_STATES[device_id]
 
     def handle_hr_notification(_: int, data: bytearray) -> None:
-        global _latest
         reading = parse_hr_measurement(bytes(data))
-        _latest = reading
-        _broadcast(_subscribers, reading)
+        state.latest = reading
+        _broadcast(state.subscribers, reading)
 
     def handle_pmd_notification(_: int, data: bytearray) -> None:
         packet = bytes(data)
@@ -100,7 +111,7 @@ async def ble_loop(stop_event: asyncio.Event) -> None:
             except ValueError:
                 return
             _broadcast(
-                _ecg_subscribers,
+                state.ecg_subscribers,
                 {"samples_uv": samples, "sample_rate_hz": ECG_SAMPLE_RATE_HZ},
             )
             return
@@ -111,7 +122,7 @@ async def ble_loop(stop_event: asyncio.Event) -> None:
             except ValueError:
                 return
             _broadcast(
-                _acc_subscribers,
+                state.acc_subscribers,
                 {
                     "samples_mg": samples,
                     "sample_rate_hz": ACC_SAMPLE_RATE_HZ,
@@ -120,8 +131,7 @@ async def ble_loop(stop_event: asyncio.Event) -> None:
             )
 
     async def on_connect(client: BleakClient) -> None:
-        global _latest
-        _latest = {}
+        state.latest = {}
         await client.start_notify(HR_MEASUREMENT_UUID, handle_hr_notification)
 
         # ECG and ACC share the Polar PMD data characteristic.
@@ -135,69 +145,76 @@ async def ble_loop(stop_event: asyncio.Event) -> None:
         except Exception as exc:
             print(f"[h10] ACC stream unavailable: {exc}")
 
-    await ble_connect_loop(H10_ADDRESS, stop_event, on_connect)
+    await ble_connect_loop(address, stop_event, on_connect)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     stop_event = asyncio.Event()
-    ble_task = asyncio.create_task(ble_loop(stop_event))
+    ble_tasks = [
+        asyncio.create_task(ble_loop(device_id, address, stop_event))
+        for device_id, address in H10_ADDRESS.items()
+    ]
 
     yield
 
     stop_event.set()
-    ble_task.cancel()
-    try:
-        await ble_task
-    except asyncio.CancelledError:
-        pass
+    for ble_task in ble_tasks:
+        ble_task.cancel()
+    if ble_tasks:
+        await asyncio.gather(*ble_tasks, return_exceptions=True)
 
 
 app = FastAPI(title="Pi-Pulse - Polar H10 Heart Rate", lifespan=lifespan)
 
 
-@app.get("/health")
-async def health():
+@app.get("/h10/{device_id}/health")
+async def health(device_id: str):
+    state = _device_state(device_id)
     return {
         "status": "pulsing",
         "sensor": "Polar H10",
-        "address": H10_ADDRESS,
-        "connected": bool(_latest),
+        "device_id": device_id,
+        "address": state.address,
+        "connected": bool(state.latest),
     }
 
 
-async def hr_stream(max_frames: Optional[int] = None):
-    async for frame in queue_stream(_subscribers, _subscribers_lock, max_frames):
+async def hr_stream(device_id: str, max_frames: Optional[int] = None):
+    state = _device_state(device_id)
+    async for frame in queue_stream(state.subscribers, state.subscribers_lock, max_frames):
         yield frame
 
 
-@app.get("/stream")
-async def stream():
+@app.get("/h10/{device_id}/stream")
+async def stream(device_id: str):
     """SSE stream: heart-rate (bpm) and RR intervals (ms)."""
-    return sse_response(hr_stream())
+    return sse_response(hr_stream(device_id))
 
 
-async def ecg_stream(max_frames: Optional[int] = None):
+async def ecg_stream(device_id: str, max_frames: Optional[int] = None):
+    state = _device_state(device_id)
     async for frame in queue_stream(
-        _ecg_subscribers, _ecg_subscribers_lock, max_frames
+        state.ecg_subscribers, state.ecg_subscribers_lock, max_frames
     ):
         yield frame
 
 
-async def acc_stream(max_frames: Optional[int] = None):
+async def acc_stream(device_id: str, max_frames: Optional[int] = None):
+    state = _device_state(device_id)
     async for frame in queue_stream(
-        _acc_subscribers, _acc_subscribers_lock, max_frames
+        state.acc_subscribers, state.acc_subscribers_lock, max_frames
     ):
         yield frame
 
 
-@app.get("/ecg-stream")
-async def ecg_stream_endpoint():
+@app.get("/h10/{device_id}/ecg-stream")
+async def ecg_stream_endpoint(device_id: str):
     """SSE stream: batched ECG samples (uV) at 130 Hz from the Polar PMD service."""
-    return sse_response(ecg_stream())
+    return sse_response(ecg_stream(device_id))
 
 
-@app.get("/acc-stream")
-async def acc_stream_endpoint():
+@app.get("/h10/{device_id}/acc-stream")
+async def acc_stream_endpoint(device_id: str):
     """SSE stream: batched accelerometer samples (mG) at 200 Hz from Polar PMD."""
-    return sse_response(acc_stream())
+    return sse_response(acc_stream(device_id))

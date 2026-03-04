@@ -7,7 +7,7 @@ Covers:
 - ecg_stream            — SSE framing verified via max_frames + feeder task
 - parse_acc_frame       — PMD accelerometer parsing, error paths
 - acc_stream            — SSE framing verified via max_frames + feeder task
-- FastAPI /health       — route response body
+- FastAPI /h10/{device_id}/health — route response body
 """
 
 import asyncio
@@ -40,27 +40,40 @@ async def _noop_lifespan(app):
     yield
 
 
+# ── per-device helpers ────────────────────────────────────────────────────────
+
+
+def _first_device_id(mod):
+    return next(iter(mod.H10_ADDRESS))
+
+
+def _state(mod, device_id=None):
+    return mod._device_state(device_id or _first_device_id(mod))
+
+
 # ── hr_stream feeder helper ───────────────────────────────────────────────────
 
 
-async def _collect_hr_frames(mod, n, reading=None):
+async def _collect_hr_frames(mod, n, reading=None, device_id=None):
     """
-    Run hr_stream(max_frames=n) while concurrently feeding it n fake readings.
+    Run hr_stream(device_id, max_frames=n) while concurrently feeding readings.
 
     hr_stream blocks on asyncio.Queue.get() waiting for BLE notifications; in
     tests we simulate those notifications by putting items directly into every
-    queue registered in mod._subscribers.
+    queue registered for the target device.
     """
     if reading is None:
         reading = {"bpm": 72, "rr_ms": [833]}
+    device_id = device_id or _first_device_id(mod)
+    state = _state(mod, device_id)
 
     async def feeder():
         for _ in range(n):
             # Yield once so the generator can start and register its queue,
             # then wait on q.get(); after that we can safely put_nowait.
             await asyncio.sleep(0)
-            async with mod._subscribers_lock:
-                for q in list(mod._subscribers):
+            async with state.subscribers_lock:
+                for q in list(state.subscribers):
                     try:
                         q.put_nowait(reading)
                     except asyncio.QueueFull:
@@ -68,7 +81,7 @@ async def _collect_hr_frames(mod, n, reading=None):
 
     feeder_task = asyncio.create_task(feeder())
     frames = []
-    async for frame in mod.hr_stream(max_frames=n):
+    async for frame in mod.hr_stream(device_id, max_frames=n):
         frames.append(frame)
     await feeder_task
     return frames
@@ -165,7 +178,7 @@ def test_parse_hr_returns_dict_with_bpm_and_rr_ms_keys():
 
 # ── hr_stream — SSE framing ───────────────────────────────────────────────────
 # hr_stream blocks on Queue.get() waiting for BLE notifications.
-# The feeder coroutine simulates BLE callbacks by writing into _subscribers.
+# The feeder coroutine simulates BLE callbacks by writing into a device queue.
 
 
 def test_hr_stream_single_frame_has_sse_prefix():
@@ -209,10 +222,10 @@ def test_hr_stream_frame_contains_correct_bpm():
 
 
 def test_hr_stream_subscriber_cleaned_up_after_exit():
-    """After the generator exits, its queue is removed from _subscribers."""
+    """After the generator exits, its queue is removed from the device queue set."""
     h10 = _load_h10()
     asyncio.run(_collect_hr_frames(h10, n=1))
-    assert len(h10._subscribers) == 0
+    assert len(_state(h10).subscribers) == 0
 
 
 # ── parse_ecg_frame ───────────────────────────────────────────────────────────
@@ -435,23 +448,25 @@ def test_parse_acc_frame_raises_on_unsupported_frame_type():
 
 # ── ecg_stream — SSE framing ──────────────────────────────────────────────────
 # ecg_stream blocks on Queue.get() waiting for PMD Data notifications.
-# The feeder coroutine simulates those by writing into _ecg_subscribers.
+# The feeder coroutine simulates those by writing into the device's ECG queues.
 
 
-async def _collect_ecg_frames(mod, n, payload=None):
+async def _collect_ecg_frames(mod, n, payload=None, device_id=None):
     """
-    Run ecg_stream(max_frames=n) while concurrently feeding it n fake payloads.
+    Run ecg_stream(device_id, max_frames=n) while concurrently feeding payloads.
 
-    Mirrors _collect_hr_frames; uses _ecg_subscribers instead of _subscribers.
+    Mirrors _collect_hr_frames but targets one device's ECG subscriber queues.
     """
     if payload is None:
         payload = {"samples_uv": [100, -200, 300], "sample_rate_hz": 130}
+    device_id = device_id or _first_device_id(mod)
+    state = _state(mod, device_id)
 
     async def feeder():
         for _ in range(n):
             await asyncio.sleep(0)
-            async with mod._ecg_subscribers_lock:
-                for q in list(mod._ecg_subscribers):
+            async with state.ecg_subscribers_lock:
+                for q in list(state.ecg_subscribers):
                     try:
                         q.put_nowait(payload)
                     except asyncio.QueueFull:
@@ -459,7 +474,7 @@ async def _collect_ecg_frames(mod, n, payload=None):
 
     feeder_task = asyncio.create_task(feeder())
     frames = []
-    async for frame in mod.ecg_stream(max_frames=n):
+    async for frame in mod.ecg_stream(device_id, max_frames=n):
         frames.append(frame)
     await feeder_task
     return frames
@@ -498,22 +513,22 @@ def test_ecg_stream_frame_contains_correct_payload():
 
 
 def test_ecg_stream_subscriber_cleaned_up_after_exit():
-    """After the generator exits, its queue is removed from _ecg_subscribers."""
+    """After the generator exits, its queue is removed from the device ECG set."""
     h10 = _load_h10()
     asyncio.run(_collect_ecg_frames(h10, n=1))
-    assert len(h10._ecg_subscribers) == 0
+    assert len(_state(h10).ecg_subscribers) == 0
 
 
 # ── acc_stream — SSE framing ──────────────────────────────────────────────────
 # acc_stream blocks on Queue.get() waiting for PMD Data notifications.
-# The feeder coroutine simulates those by writing into _acc_subscribers.
+# The feeder coroutine simulates those by writing into the device ACC queues.
 
 
-async def _collect_acc_frames(mod, n, payload=None):
+async def _collect_acc_frames(mod, n, payload=None, device_id=None):
     """
-    Run acc_stream(max_frames=n) while concurrently feeding it n fake payloads.
+    Run acc_stream(device_id, max_frames=n) while concurrently feeding payloads.
 
-    Mirrors _collect_ecg_frames; uses _acc_subscribers instead of _ecg_subscribers.
+    Mirrors _collect_ecg_frames but targets one device's ACC subscriber queues.
     """
     if payload is None:
         payload = {
@@ -521,12 +536,14 @@ async def _collect_acc_frames(mod, n, payload=None):
             "sample_rate_hz": 200,
             "range_g": 8,
         }
+    device_id = device_id or _first_device_id(mod)
+    state = _state(mod, device_id)
 
     async def feeder():
         for _ in range(n):
             await asyncio.sleep(0)
-            async with mod._acc_subscribers_lock:
-                for q in list(mod._acc_subscribers):
+            async with state.acc_subscribers_lock:
+                for q in list(state.acc_subscribers):
                     try:
                         q.put_nowait(payload)
                     except asyncio.QueueFull:
@@ -534,7 +551,7 @@ async def _collect_acc_frames(mod, n, payload=None):
 
     feeder_task = asyncio.create_task(feeder())
     frames = []
-    async for frame in mod.acc_stream(max_frames=n):
+    async for frame in mod.acc_stream(device_id, max_frames=n):
         frames.append(frame)
     await feeder_task
     return frames
@@ -577,25 +594,27 @@ def test_acc_stream_frame_contains_correct_payload():
 
 
 def test_acc_stream_subscriber_cleaned_up_after_exit():
-    """After the generator exits, its queue is removed from _acc_subscribers."""
+    """After the generator exits, its queue is removed from the device ACC set."""
     h10 = _load_h10()
     asyncio.run(_collect_acc_frames(h10, n=1))
-    assert len(h10._acc_subscribers) == 0
+    assert len(_state(h10).acc_subscribers) == 0
 
 
-# ── FastAPI /health ───────────────────────────────────────────────────────────
+# ── FastAPI /h10/{device_id}/health ───────────────────────────────────────────
 
 
 def test_health_endpoint_returns_expected_body():
     from starlette.testclient import TestClient
 
     h10 = _load_h10()
+    device_id = _first_device_id(h10)
     h10.app.router.lifespan_context = _noop_lifespan
     with TestClient(h10.app) as client:
-        resp = client.get("/health")
+        resp = client.get(f"/h10/{device_id}/health")
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "pulsing"
     assert body["sensor"] == "Polar H10"
-    assert body["address"] == h10.H10_ADDRESS
+    assert body["device_id"] == device_id
+    assert body["address"] == h10.H10_ADDRESS[device_id]
     assert "connected" in body
