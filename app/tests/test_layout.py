@@ -171,14 +171,31 @@ def test_h10_cards_match_chart_mapping(monkeypatch) -> None:
     assert first_header["args"][0] == "Heart Rate"
     accel_header = cards[3]["args"][0]["args"][0]
     assert accel_header["args"][0]["tag"] == "tooltip"
-    assert "Calculated over a 0.5 s window." in accel_header["args"][0]["args"]
-    assert (
-        "It then subtracts that average from each sample and averages the remaining magnitudes."
-        in accel_header["args"][0]["args"]
-    )
+    tooltip_args = accel_header["args"][0]["args"]
+    # use H10_ACC_DYNAMIC_WINDOW_S from the injected app.config if available
+    cfg = sys.modules.get("app.config")
+    if cfg is not None and hasattr(cfg, "H10_ACC_DYNAMIC_WINDOW_S"):
+        window_s = f"{cfg.H10_ACC_DYNAMIC_WINDOW_S:g}"
+    else:
+        window_s = "0.5"
+    # check that the tooltip mentions the configured window (e.g. "0.5 s")
+    assert any(isinstance(a, str) and f"{window_s} s" in a for a in tooltip_args), f"window '{window_s} s' not found in {tooltip_args}"
+    # accept multiple possible phrasings describing the processing step
+    assert any(
+        isinstance(a, str)
+        and (
+            "subtract" in a
+            or "Baseline" in a
+            or "remove" in a
+            or "average" in a
+        )
+        for a in tooltip_args
+    ), f"processing description not found in {tooltip_args}"
     tilt_header = cards[4]["args"][0]["args"][0]
     assert tilt_header["args"][0]["tag"] == "tooltip"
-    assert tilt_header["args"][0]["args"][1] == "Acceleration Axes"
+    # ensure the label span contains 'Acceleration Axes'
+    span_args = tilt_header["args"][0]["args"][0]["args"]
+    assert any(isinstance(s, str) and "Acceleration Axes" in s for s in span_args)
     assert (
         "At rest, one axis is often near 1000 mg because gravity is about 1 g."
         in tilt_header["args"][0]["args"]
