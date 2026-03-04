@@ -92,6 +92,40 @@ def _normalize_h10_ecg_chunk(data: dict) -> dict:
     }
 
 
+def _enqueue_ecg_samples(
+    queue: deque[tuple[float, int]],
+    samples_uv: list[int],
+    *,
+    arrival_time: float,
+    sample_rate_hz: int,
+) -> float:
+    """Append ECG samples to a FIFO queue with logical timestamps."""
+    if not samples_uv:
+        return arrival_time
+    interval_s = 1.0 / max(sample_rate_hz, 1)
+    start_time = max(arrival_time, queue[-1][0] + interval_s) if queue else arrival_time
+    logical_time = start_time
+    for sample_uv in samples_uv:
+        queue.append((logical_time, sample_uv))
+        logical_time += interval_s
+    return logical_time - interval_s
+
+
+def _drain_ready_ecg_samples(
+    queue: deque[tuple[float, int]],
+    *,
+    now: float,
+    playout_delay_s: float,
+) -> list[int]:
+    """Drain all samples older than now - playout_delay from the FIFO."""
+    ready_before = now - playout_delay_s
+    ready_samples: list[int] = []
+    while queue and queue[0][0] <= ready_before:
+        _, sample_uv = queue.popleft()
+        ready_samples.append(sample_uv)
+    return ready_samples
+
+
 def _normalize_h10_acc_chunk(data: dict) -> dict:
     sample_rate = data.get("sample_rate_hz", 200)
     if (
@@ -233,10 +267,13 @@ def server(input, output, session):
         k: reactive.Value(dict(_h10_ecg_default)) for k in H10_DEVICES
     }
     _h10_ecg_display_samples = 1300  # 10 s at 130 Hz
+    _h10_ecg_playout_delay_s = 0.5
+    _h10_ecg_render_fps = 30.0
     h10_ecg_samples: dict[str, deque] = {
         k: deque(maxlen=_h10_ecg_display_samples) for k in H10_DEVICES
     }
     h10_ecg_sample_rate: dict[str, int] = {k: 130 for k in H10_DEVICES}
+    h10_ecg_jitter_queue: dict[str, deque] = {k: deque() for k in H10_DEVICES}
     _h10_acc_default = {
         "mean_dynamic_accel_mg": 0.0,
         "sample_rate_hz": 200,
@@ -282,14 +319,34 @@ def server(input, output, session):
         normalized = _normalize_h10_ecg_chunk(data)
         if not normalized["samples_uv"]:
             return
-        h10_ecg_samples[key].extend(normalized["samples_uv"])
         h10_ecg_sample_rate[key] = normalized["sample_rate_hz"]
-        h10_ecg_latest[key].set(
-            {
-                "samples_uv": list(h10_ecg_samples[key]),
-                "sample_rate_hz": h10_ecg_sample_rate[key],
-            }
+        _enqueue_ecg_samples(
+            h10_ecg_jitter_queue[key],
+            normalized["samples_uv"],
+            arrival_time=time.monotonic(),
+            sample_rate_hz=h10_ecg_sample_rate[key],
         )
+
+    async def ecg_playout_loop() -> None:
+        frame_interval_s = 1.0 / _h10_ecg_render_fps
+        while True:
+            now = time.monotonic()
+            for key in H10_DEVICES:
+                ready_samples = _drain_ready_ecg_samples(
+                    h10_ecg_jitter_queue[key],
+                    now=now,
+                    playout_delay_s=_h10_ecg_playout_delay_s,
+                )
+                if not ready_samples:
+                    continue
+                h10_ecg_samples[key].extend(ready_samples)
+                h10_ecg_latest[key].set(
+                    {
+                        "samples_uv": list(h10_ecg_samples[key]),
+                        "sample_rate_hz": h10_ecg_sample_rate[key],
+                    }
+                )
+            await asyncio.sleep(frame_interval_s)
 
     async def on_h10_acc(key: str, data: dict):
         normalized = _normalize_h10_acc_chunk(data)
@@ -387,6 +444,7 @@ def server(input, output, session):
             for k, v in H10_DEVICES.items()
             if v.get("acc_stream")
         ]
+        + [asyncio.create_task(ecg_playout_loop())]
     )
     session.on_ended(lambda: [t.cancel() for t in tasks])
 
