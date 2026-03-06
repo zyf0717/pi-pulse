@@ -2,7 +2,7 @@
 
 Real-time monitoring for Raspberry Pi nodes, SEN66 environmental sensors, and Polar H10 straps.
 
-The repo has two main parts:
+The repo has two main runtime parts:
 
 - `app/`: the Shiny for Python dashboard
 - `rpi4/`: Raspberry Pi sensor services that publish SSE streams
@@ -15,11 +15,31 @@ The repo has two main parts:
 - Multi-H10 support per Pi node
 - SSE-based ingestion throughout
 
+## Architecture
+
+Pi-Pulse is split by responsibility:
+
+- `rpi4/` acquires sensor data and exposes it over FastAPI SSE endpoints
+- `app/` consumes those SSE streams, holds short in-memory histories, and renders the dashboard
+
+High-level flow:
+
+1. Each Raspberry Pi node runs one or more services from `rpi4/`.
+2. Those services publish JSON over SSE:
+   - pulse on `8001`
+   - SEN66 on `8002`
+   - H10 on `8003`
+3. The dashboard loads [app/config.yaml](app/config.yaml) and opens one SSE consumer per configured upstream stream.
+4. The app normalizes incoming data into bounded reactive state and short FIFO histories.
+5. The UI renders cards and charts from that state.
+6. ECG is the special case: the app forwards raw ECG chunks to the browser, and the browser draws the sweep client-side with Plotly.
+
 ## Repo Layout
 
 ```text
 .
 ├── app/
+│   ├── README.md
 │   ├── pi_pulse.py
 │   ├── config.py
 │   ├── config.yaml
@@ -31,12 +51,22 @@ The repo has two main parts:
 │   ├── www/
 │   └── tests/
 ├── rpi4/
+│   ├── README.md
 │   ├── h10.py
 │   ├── h10_protocol.py
-│   └── sse.py
+│   ├── pulse.py
+│   ├── sen66.py
+│   ├── sse.py
+│   ├── *.service
+│   └── tests/
 ├── environment.yml
 └── cron.sh
 ```
+
+## Documentation
+
+- [app/README.md](app/README.md): dashboard config, runtime, and tests
+- [rpi4/README.md](rpi4/README.md): Raspberry Pi setup, permissions, H10 config, and systemd install
 
 ## Install
 
@@ -45,7 +75,7 @@ conda env create -f environment.yml
 conda activate pi-pulse
 ```
 
-## Dashboard Config
+## Configuration
 
 Dashboard config lives in [app/config.yaml](app/config.yaml).
 
@@ -80,6 +110,24 @@ Rules:
 - the dashboard device selector works at the node level
 - if a node has multiple H10 straps, the H10 tab shows an additional stream selector
 
+## Runtime Model
+
+`app/config.yaml` is node-centric. The main selector works at the node level, and the H10 tab adds an H10-specific selector when a node has multiple straps.
+
+On the app side:
+
+- [app/streams/consumer.py](app/streams/consumer.py) manages SSE reconnect/backoff
+- [app/server.py](app/server.py) owns normalization and bounded in-memory histories
+- [app/layout.py](app/layout.py) defines the page structure and includes JS/CSS assets
+- [app/renders/](app/renders) contains sensor-specific render logic
+- [app/www/ecg-sweep.js](app/www/ecg-sweep.js) owns ECG sweep buffering and display timing in the browser
+
+On the Pi side:
+
+- [rpi4/pulse.py](rpi4/pulse.py) exposes system metrics
+- [rpi4/sen66.py](rpi4/sen66.py) exposes environmental metrics
+- [rpi4/h10.py](rpi4/h10.py) exposes multi-H10 HR, ECG, and ACC endpoints
+
 ## Run
 
 Dashboard:
@@ -90,18 +138,7 @@ python -m app.pi_pulse
 
 This starts the Shiny app on `127.0.0.1:8009`.
 
-H10 service on a Pi:
-
-```bash
-python -m rpi4.h10
-```
-
-The H10 service exposes one endpoint set per configured strap:
-
-- `/h10/{device_id}/health`
-- `/h10/{device_id}/stream`
-- `/h10/{device_id}/ecg-stream`
-- `/h10/{device_id}/acc-stream`
+Pi-side services are documented in [rpi4/README.md](rpi4/README.md).
 
 ## Stream Expectations
 
@@ -179,13 +216,6 @@ H10 ACC stream:
 }
 ```
 
-## Notes
-
-- The dashboard consumes SSE with reconnect/backoff logic in [app/streams/consumer.py](app/streams/consumer.py).
-- ECG rendering is client-driven via Plotly in [app/www/ecg-sweep.js](app/www/ecg-sweep.js).
-- Card click behavior is implemented in [app/www/card-click.js](app/www/card-click.js).
-- Browser keepalive/reconnect behavior is implemented in [app/www/keepalive.js](app/www/keepalive.js).
-
 ## Tests
 
 Run the app test suite:
@@ -202,3 +232,9 @@ Current app coverage includes:
 - SSE consumer/parser behavior
 - ECG sweep message contract
 - static asset presence/behavior checks
+
+Pi-side tests are in `rpi4/tests` and can be run with:
+
+```bash
+pytest rpi4/tests
+```
