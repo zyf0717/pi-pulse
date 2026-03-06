@@ -34,5 +34,7 @@ def reset_chart_state(state: dict) -> None:
     state.update({"chart": None, "dev": None, "tpl": None})
 
 
-def needs_chart_rebuild(state: Mapping[str, object], chart: str, dev: str, tpl: str) -> bool:
+def needs_chart_rebuild(
+    state: Mapping[str, object], chart: str, dev: str, tpl: str
+) -> bool:
     return state["chart"] != chart or state["dev"] != dev or state["tpl"] != tpl
