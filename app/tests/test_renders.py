@@ -199,6 +199,8 @@ def _load_render_module(monkeypatch, filename: str, config_attrs: dict):
 
     fake_sparkline = ModuleType("app.sparkline")
     fake_ecg_sweep = ModuleType("app.renders.ecg_sweep")
+    fake_h10_motion = ModuleType("app.renders.h10_motion")
+    fake_h10_ecg_bridge = ModuleType("app.renders.h10_ecg_bridge")
 
     def sparkline(values, fmt=None):
         rendered = [fmt(value) for value in values] if fmt else list(values)
@@ -235,8 +237,118 @@ def _load_render_module(monkeypatch, filename: str, config_attrs: dict):
         payload.update(kwargs)
         return payload
 
+    def motion_plane_svg(trail_points, *, axes, axis_names, detail):
+        labels = f">{axis_names[0]}<>{axis_names[1]}<"
+        polyline = "polyline" if len(trail_points) >= 2 else ""
+        detail_labels = (
+            "+1500-1500Z: +990 mg"
+            if detail and trail_points
+            else ""
+        )
+        preview_labels = "" if detail else labels
+        return f"<svg>{polyline}{preview_labels}{detail_labels}</svg>"
+
+    def motion_detail_row_svg(trail_points):
+        return "".join(
+            motion_plane_svg(
+                trail_points,
+                axes=axes,
+                axis_names=axis_names,
+                detail=True,
+            )
+            for axes, axis_names in (
+                ((0, 1), ("X", "Y")),
+                ((0, 2), ("X", "Z")),
+                ((1, 2), ("Y", "Z")),
+            )
+        )
+
+    def update_ecg_sweep(
+        session,
+        state,
+        *,
+        chart,
+        stream_key,
+        template,
+        ecg_meta,
+        ecg_samples,
+        ecg_chunks,
+        title,
+    ):
+        if session is None:
+            return
+        if chart != "ecg" or stream_key is None:
+            if state["chart"] == "ecg":
+                session.send_custom_message(
+                    "ecg-sweep",
+                    {"plot_id": "h10_ecg_sweep", "op": "clear"},
+                )
+            state.update(
+                {"chart": chart, "stream": stream_key, "tpl": template, "sent_total": 0}
+            )
+            return
+
+        total_samples = int(ecg_meta.get("total_samples", len(ecg_samples)) or 0)
+        force_reset = (
+            state["chart"] != "ecg"
+            or state["stream"] != stream_key
+            or state["tpl"] != template
+        )
+
+        if force_reset:
+            session.send_custom_message(
+                "ecg-sweep",
+                build_ecg_sweep_message(
+                    "h10_ecg_sweep",
+                    op="reset",
+                    samples=list(ecg_samples),
+                    sample_rate_hz=int(ecg_meta.get("sample_rate_hz", 130) or 130),
+                    title=title,
+                    template=template,
+                ),
+            )
+            state.update(
+                {
+                    "chart": chart,
+                    "stream": stream_key,
+                    "tpl": template,
+                    "sent_total": total_samples,
+                }
+            )
+            return
+
+        sent_total = int(state.get("sent_total", 0) or 0)
+        for chunk in ecg_chunks:
+            if int(chunk.get("total_samples", 0) or 0) <= sent_total:
+                continue
+            session.send_custom_message(
+                "ecg-sweep",
+                build_ecg_sweep_message(
+                    "h10_ecg_sweep",
+                    op="append",
+                    samples=list(chunk.get("samples_uv", [])),
+                    sample_rate_hz=int(chunk.get("sample_rate_hz", 130) or 130),
+                    title=title,
+                    template=template,
+                ),
+            )
+            sent_total = int(chunk.get("total_samples", sent_total) or sent_total)
+
+        state.update(
+            {
+                "chart": chart,
+                "stream": stream_key,
+                "tpl": template,
+                "sent_total": sent_total,
+            }
+        )
+
     fake_ecg_sweep.ECG_SWEEP_MESSAGE = "ecg-sweep"
     fake_ecg_sweep.build_ecg_sweep_message = build_ecg_sweep_message
+    fake_h10_motion.motion_plane_svg = motion_plane_svg
+    fake_h10_motion.motion_detail_row_svg = motion_detail_row_svg
+    fake_h10_ecg_bridge.ECG_SWEEP_PLOT_ID = "h10_ecg_sweep"
+    fake_h10_ecg_bridge.update_ecg_sweep = update_ecg_sweep
 
     monkeypatch.setitem(sys.modules, "shiny", fake_shiny)
     monkeypatch.setitem(sys.modules, "shinywidgets", fake_shinywidgets)
@@ -246,6 +358,8 @@ def _load_render_module(monkeypatch, filename: str, config_attrs: dict):
     monkeypatch.setitem(sys.modules, "app.renders", fake_app_renders)
     monkeypatch.setitem(sys.modules, "app.config", fake_config)
     monkeypatch.setitem(sys.modules, "app.renders.ecg_sweep", fake_ecg_sweep)
+    monkeypatch.setitem(sys.modules, "app.renders.h10_motion", fake_h10_motion)
+    monkeypatch.setitem(sys.modules, "app.renders.h10_ecg_bridge", fake_h10_ecg_bridge)
     monkeypatch.setitem(sys.modules, "app.sparkline", fake_sparkline)
     monkeypatch.setitem(sys.modules, "app.renders.render_utils", fake_render_utils)
 
