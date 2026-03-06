@@ -1,5 +1,7 @@
 """Standalone Plotly sweep helpers for ECG rendering."""
 
+import plotly.io as pio
+
 ECG_SWEEP_MESSAGE = "ecg-sweep"
 ECG_SWEEP_FPS = 30.0
 ECG_SWEEP_WINDOW_SECONDS = 10.0
@@ -26,12 +28,16 @@ ECG_SWEEP_JS = """
   }
 
   function drawCurrentState(container, state) {
-    var cursorX = state.xValues[state.cursorIndex] || 0;
+    var latestIndex = (state.cursorIndex - 1 + state.maxPoints) % state.maxPoints;
+    var latestX = state.xValues[latestIndex] || 0;
+    var latestY = state.yValues[latestIndex];
+    var markerX = latestY == null ? [] : [latestX];
+    var markerY = latestY == null ? [] : [latestY];
     window.Plotly.restyle(
       container,
       {
-        x: [state.xValues, [cursorX, cursorX]],
-        y: [state.yValues, state.yRange]
+        x: [state.xValues, markerX],
+        y: [state.yValues, markerY]
       },
       [0, 1]
     );
@@ -41,6 +47,20 @@ ECG_SWEEP_JS = """
     if (!window.Shiny || !window.Plotly) {
       setTimeout(ensureHandler, 50);
       return;
+    }
+
+    function templateLayout(templateConfig) {
+      if (!templateConfig || typeof templateConfig !== "object") {
+        return {};
+      }
+      return templateConfig.layout && typeof templateConfig.layout === "object"
+        ? templateConfig.layout
+        : {};
+    }
+
+    function themeColorway(templateConfig) {
+      var layout = templateLayout(templateConfig);
+      return Array.isArray(layout.colorway) ? layout.colorway : [];
     }
 
     window.Shiny.addCustomMessageHandler("ecg-sweep", function (msg) {
@@ -69,9 +89,10 @@ ECG_SWEEP_JS = """
         }
 
         var templateName = msg.template || "plotly_dark";
-        var isDark = templateName.indexOf("dark") !== -1;
-        var lineColor = msg.line_color || "#636efa";
-        var cursorColor = msg.cursor_color || (isDark ? "#f5f5f5" : "#2f2f2f");
+        var templateConfig = msg.template_config || templateName;
+        var colorway = themeColorway(msg.template_config);
+        var lineColor = msg.line_color || colorway[0] || "#636efa";
+        var cursorColor = msg.cursor_color || lineColor;
         var maxPoints = msg.max_points;
         var sampleRate = msg.sample_rate_hz;
         var fps = msg.fps || 30;
@@ -114,21 +135,21 @@ ECG_SWEEP_JS = """
               hoverinfo: "skip"
             },
             {
-              x: [0, 0],
-              y: state.yRange,
-              mode: "lines",
+              x: [],
+              y: [],
+              mode: "markers",
               type: "scattergl",
-              name: "Cursor",
-              line: {
+              name: "Latest",
+              marker: {
                 color: cursorColor,
-                width: 1
+                size: 8
               },
               hoverinfo: "skip",
               showlegend: false
             }
           ],
           {
-            template: templateName,
+            template: templateConfig,
             margin: { l: 20, r: 20, t: 20, b: 20 },
             showlegend: false,
             uirevision: "ecg-sweep",
@@ -229,6 +250,7 @@ def build_ecg_sweep_message(
 ) -> dict[str, object]:
     max_points = max(1, int(round(sample_rate_hz * window_seconds)))
     max_pending_points = max(1, int(round(sample_rate_hz * max_pending_seconds)))
+    template_config = pio.templates[template].to_plotly_json()
     return {
         "plot_id": plot_id,
         "op": op,
@@ -240,6 +262,7 @@ def build_ecg_sweep_message(
         "gap_points": gap_points,
         "title": title,
         "template": template,
+        "template_config": template_config,
         "x_title": x_title,
         "y_title": y_title,
         "line_color": line_color,
