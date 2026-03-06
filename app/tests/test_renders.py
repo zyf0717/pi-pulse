@@ -13,7 +13,6 @@ class _Registry:
         self.ui: dict[str, object] = {}
         self.effects: dict[str, object] = {}
         self.widgets: dict[str, object] = {}
-        self.invalidations: list[tuple[float, object]] = []
 
 
 class _FakeRender:
@@ -46,9 +45,6 @@ class _FakeReactive:
     def Effect(self, fn):
         self._registry.effects[fn.__name__] = fn
         return fn
-
-    def invalidate_later(self, delay: float, *, session=None) -> None:
-        self._registry.invalidations.append((delay, session))
 
 
 class _FakeValue:
@@ -234,38 +230,12 @@ def _load_render_module(monkeypatch, filename: str, config_attrs: dict):
     fake_render_utils.reset_chart_state = reset_chart_state
     fake_render_utils.needs_chart_rebuild = needs_chart_rebuild
 
-    class _FakeSweepFramePlayer:
-        def __init__(self, sample_rate_hz: float, fps: float = 30.0):
-            self.sample_rate_hz = sample_rate_hz
-            self.fps = fps
-            self.reset_calls = 0
-
-        def reset(self) -> None:
-            self.reset_calls += 1
-
-        def next_frame(
-            self,
-            source,
-            total_count: int,
-            *,
-            sample_rate_hz: float | None = None,
-            force_reset: bool = False,
-        ):
-            samples = list(source)
-            if not samples:
-                return None
-            if force_reset:
-                return {"op": "reset", "samples": samples[-10:]}
-            return {"op": "append", "samples": samples[-4:]}
-
-    def build_ecg_sweep_message(plot_id: str, frame: dict, **kwargs):
-        payload = {"plot_id": plot_id, "op": frame["op"], "samples": frame["samples"]}
+    def build_ecg_sweep_message(plot_id: str, *, op: str, samples, **kwargs):
+        payload = {"plot_id": plot_id, "op": op, "samples": list(samples)}
         payload.update(kwargs)
         return payload
 
-    fake_ecg_sweep.ECG_SWEEP_FPS = 30.0
     fake_ecg_sweep.ECG_SWEEP_MESSAGE = "ecg-sweep"
-    fake_ecg_sweep.SweepFramePlayer = _FakeSweepFramePlayer
     fake_ecg_sweep.build_ecg_sweep_message = build_ecg_sweep_message
 
     monkeypatch.setitem(sys.modules, "shiny", fake_shiny)
@@ -394,6 +364,7 @@ def test_h10_value_boxes_format_current_snapshot(monkeypatch) -> None:
         },
     )
     input_obj = _FakeInput(device="11")
+    session = _FakeSession()
     module.register_h10_renders(
         input_obj,
         {
@@ -410,12 +381,14 @@ def test_h10_value_boxes_format_current_snapshot(monkeypatch) -> None:
         {"11": deque()},
         {"11": _FakeValue({"samples_uv": [1, 2, 3], "sample_rate_hz": 130})},
         {"11": deque([1, 2, 3])},
+        {"11": deque([{"samples_uv": [1, 2, 3], "sample_rate_hz": 130, "total_samples": 3}])},
         {"11": _FakeValue({"mean_dynamic_accel_mg": 18.4, "sample_rate_hz": 200})},
         {"11": deque([(None, {"mean_dynamic_accel_mg": 18.4})])},
         {"11": _FakeValue({"trail_points": [(0.0, 0.0, 1000.0), (10.0, -5.0, 980.0)]})},
         lambda: "plotly_dark",
         _FakeFigureWidget(),
         {"chart": None, "dev": None, "tpl": None},
+        session,
     )
 
     assert registry.text["h10_bpm_val"]() == "72 bpm"
@@ -471,6 +444,7 @@ def test_h10_selector_is_rendered_for_nodes_with_multiple_streams(monkeypatch) -
             },
         },
     )
+    session = _FakeSession()
     module.register_h10_renders(
         _FakeInput(device="11", h10_device="11:strap-b"),
         {
@@ -482,6 +456,7 @@ def test_h10_selector_is_rendered_for_nodes_with_multiple_streams(monkeypatch) -
             "11:strap-a": _FakeValue({"samples_uv": [], "sample_rate_hz": 130}),
             "11:strap-b": _FakeValue({"samples_uv": [], "sample_rate_hz": 130}),
         },
+        {"11:strap-a": deque(), "11:strap-b": deque()},
         {"11:strap-a": deque(), "11:strap-b": deque()},
         {
             "11:strap-a": _FakeValue({"mean_dynamic_accel_mg": 0.0, "sample_rate_hz": 200}),
@@ -495,6 +470,7 @@ def test_h10_selector_is_rendered_for_nodes_with_multiple_streams(monkeypatch) -
         lambda: "plotly_dark",
         _FakeFigureWidget(),
         {"chart": None, "dev": None, "tpl": None},
+        session,
     )
 
     selector = registry.ui["h10_device_selector"]()
@@ -563,18 +539,21 @@ def test_h10_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> None
         },
     )
     input_obj = _FakeInput(device="99")
+    session = _FakeSession()
     module.register_h10_renders(
         input_obj,
         {"11": _FakeValue({"heart_rate_bpm": 72.0, "rr_last_ms": 840.0})},
         {"11": deque()},
         {"11": _FakeValue({"samples_uv": [1, 2, 3], "sample_rate_hz": 130})},
         {"11": deque([1, 2, 3])},
+        {"11": deque([{"samples_uv": [1, 2, 3], "sample_rate_hz": 130, "total_samples": 3}])},
         {"11": _FakeValue({"mean_dynamic_accel_mg": 18.4, "sample_rate_hz": 200})},
         {"11": deque([(None, {"mean_dynamic_accel_mg": 18.4})])},
         {"11": _FakeValue({"trail_points": []})},
         lambda: "plotly_dark",
         _FakeFigureWidget(),
         {"chart": None, "dev": None, "tpl": None},
+        session,
     )
 
     assert registry.text["h10_bpm_val"]() == "N/A"
@@ -691,6 +670,7 @@ def test_h10_invalid_device_clears_chart_sets_annotation_and_resets_state(
     widget.data = ["stale"]
     widget.layout.annotations = ["old"]
     state = {"chart": "bpm", "dev": "11", "tpl": "plotly_dark"}
+    session = _FakeSession()
 
     module.register_h10_renders(
         _FakeInput(device="99", h10_chart="bpm"),
@@ -698,12 +678,14 @@ def test_h10_invalid_device_clears_chart_sets_annotation_and_resets_state(
         {"11": deque()},
         {"11": _FakeValue({"samples_uv": [1, 2, 3], "sample_rate_hz": 130})},
         {"11": deque([1, 2, 3])},
+        {"11": deque([{"samples_uv": [1, 2, 3], "sample_rate_hz": 130, "total_samples": 3}])},
         {"11": _FakeValue({"mean_dynamic_accel_mg": 18.4, "sample_rate_hz": 200})},
         {"11": deque([(None, {"mean_dynamic_accel_mg": 18.4})])},
         {"11": _FakeValue({"trail_points": []})},
         lambda: "plotly_dark",
         widget,
         state,
+        session,
     )
 
     registry.effects["_update_h10_chart"]()
@@ -737,12 +719,19 @@ def test_h10_ecg_chart_streams_sweep_messages(monkeypatch) -> None:
     )
     session = _FakeSession()
 
+    ecg_latest = _FakeValue(
+        {"samples_uv": [50, 60], "sample_rate_hz": 130, "total_samples": 6}
+    )
+    ecg_samples = deque([10, 20, 30, 40, 50, 60])
+    ecg_chunks = deque()
+
     module.register_h10_renders(
         _FakeInput(device="11", h10_chart="ecg"),
         {"11": _FakeValue({"heart_rate_bpm": 72.0, "rr_last_ms": 840.0})},
         {"11": deque()},
-        {"11": _FakeValue({"sample_rate_hz": 130, "total_samples": 73})},
-        {"11": deque([10, 20, 30, 40, 50, 60])},
+        {"11": ecg_latest},
+        {"11": ecg_samples},
+        {"11": ecg_chunks},
         {"11": _FakeValue({"mean_dynamic_accel_mg": 18.4, "sample_rate_hz": 200})},
         {"11": deque([(None, {"mean_dynamic_accel_mg": 18.4})])},
         {"11": _FakeValue({"trail_points": []})},
@@ -757,7 +746,6 @@ def test_h10_ecg_chart_streams_sweep_messages(monkeypatch) -> None:
 
     assert detail["tag"] == "div"
     assert detail["kwargs"]["id"] == "h10_ecg_sweep"
-    assert registry.invalidations[-1][0] == 1 / 30.0
     assert session.messages == [
         (
             "ecg-sweep",
@@ -765,6 +753,32 @@ def test_h10_ecg_chart_streams_sweep_messages(monkeypatch) -> None:
                 "plot_id": "h10_ecg_sweep",
                 "op": "reset",
                 "samples": [10, 20, 30, 40, 50, 60],
+                "sample_rate_hz": 130,
+                "title": "ECG (µV)",
+                "template": "plotly_dark",
+            },
+        ),
+    ]
+
+    session.messages.clear()
+    ecg_samples.extend([70, 80])
+    ecg_chunks.append(
+        {"samples_uv": [70, 80], "sample_rate_hz": 130, "total_samples": 8}
+    )
+    ecg_latest._value = {
+        "samples_uv": [70, 80],
+        "sample_rate_hz": 130,
+        "total_samples": 8,
+    }
+    registry.effects["_update_h10_ecg_sweep"]()
+
+    assert session.messages == [
+        (
+            "ecg-sweep",
+            {
+                "plot_id": "h10_ecg_sweep",
+                "op": "append",
+                "samples": [70, 80],
                 "sample_rate_hz": 130,
                 "title": "ECG (µV)",
                 "template": "plotly_dark",
@@ -809,12 +823,14 @@ def test_h10_dynamic_accel_chart_uses_per_second_history(monkeypatch) -> None:
         {"11": deque()},
         {"11": _FakeValue({"samples_uv": [10, 20, 30], "sample_rate_hz": 130})},
         {"11": deque([10, 20, 30])},
+        {"11": deque([{"samples_uv": [10, 20, 30], "sample_rate_hz": 130, "total_samples": 3}])},
         {"11": _FakeValue({"mean_dynamic_accel_mg": 18.0, "sample_rate_hz": 200})},
         {"11": acc_history},
         {"11": _FakeValue({"trail_points": []})},
         lambda: "plotly_dark",
         widget,
         {"chart": None, "dev": None, "tpl": None},
+        _FakeSession(),
     )
 
     registry.effects["_update_h10_chart"]()
@@ -849,6 +865,7 @@ def test_h10_motion_chart_renders_svg_detail_instead_of_plotly(monkeypatch) -> N
     )
     widget = _FakeFigureWidget()
     widget.data = ["keep"]
+    session = _FakeSession()
 
     module.register_h10_renders(
         _FakeInput(device="11", h10_chart="motion"),
@@ -856,12 +873,14 @@ def test_h10_motion_chart_renders_svg_detail_instead_of_plotly(monkeypatch) -> N
         {"11": deque()},
         {"11": _FakeValue({"samples_uv": [10, 20, 30], "sample_rate_hz": 130})},
         {"11": deque([10, 20, 30])},
+        {"11": deque([{"samples_uv": [10, 20, 30], "sample_rate_hz": 130, "total_samples": 3}])},
         {"11": _FakeValue({"mean_dynamic_accel_mg": 18.0, "sample_rate_hz": 200})},
         {"11": deque([(None, {"mean_dynamic_accel_mg": 18.0})])},
         {"11": _FakeValue({"trail_points": [(0.0, 0.0, 1000.0), (12.0, -8.0, 990.0)]})},
         lambda: "plotly_dark",
         widget,
         {"chart": "bpm", "dev": "11", "tpl": "plotly_dark"},
+        session,
     )
 
     registry.effects["_update_h10_chart"]()

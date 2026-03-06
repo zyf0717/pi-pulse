@@ -10,9 +10,7 @@ from shinywidgets import output_widget, render_widget
 
 from app.config import H10_CHARTS, H10_DEFAULTS, H10_DEVICE_OPTIONS, H10_DEVICES
 from app.renders.ecg_sweep import (
-    ECG_SWEEP_FPS,
     ECG_SWEEP_MESSAGE,
-    SweepFramePlayer,
     build_ecg_sweep_message,
 )
 from app.renders.render_utils import (
@@ -343,6 +341,7 @@ def register_h10_renders(
     h10_history: dict[str, deque],
     h10_ecg_latest: dict[str, reactive.Value],
     h10_ecg_samples: dict[str, deque],
+    h10_ecg_chunks: dict[str, deque],
     h10_acc_latest: dict[str, reactive.Value],
     h10_acc_history: dict[str, deque],
     h10_motion_latest: dict[str, reactive.Value],
@@ -352,11 +351,11 @@ def register_h10_renders(
     session=None,
 ) -> None:
     """Register all H10-tab output renders inside the active Shiny session."""
-    ecg_players: dict[str, SweepFramePlayer[int]] = {}
-    ecg_sweep_state: dict[str, str | None] = {
+    ecg_sweep_state: dict[str, str | int | None] = {
         "chart": None,
         "stream": None,
         "tpl": None,
+        "sent_total": 0,
     }
 
     @render.ui
@@ -540,20 +539,15 @@ def register_h10_renders(
                     ECG_SWEEP_MESSAGE,
                     {"plot_id": _ECG_SWEEP_PLOT_ID, "op": "clear"},
                 )
-            if previous_stream in ecg_players:
-                ecg_players[previous_stream].reset()
-            ecg_sweep_state.update({"chart": chart, "stream": stream_key, "tpl": tpl})
+            ecg_sweep_state.update(
+                {"chart": chart, "stream": stream_key, "tpl": tpl, "sent_total": 0}
+            )
             return
 
-        reactive.invalidate_later(1.0 / ECG_SWEEP_FPS, session=session)
         ecg_meta = h10_ecg_latest[stream_key]()
         sample_rate_hz = int(ecg_meta.get("sample_rate_hz", 130) or 130)
         total_samples = int(
             ecg_meta.get("total_samples", len(h10_ecg_samples[stream_key])) or 0
-        )
-        player = ecg_players.setdefault(
-            stream_key,
-            SweepFramePlayer(sample_rate_hz=float(sample_rate_hz), fps=ECG_SWEEP_FPS),
         )
         force_reset = (
             ecg_sweep_state["chart"] != "ecg"
@@ -568,30 +562,76 @@ def register_h10_renders(
                     ECG_SWEEP_MESSAGE,
                     {"plot_id": _ECG_SWEEP_PLOT_ID, "op": "clear"},
                 )
-            player.reset()
-            ecg_sweep_state.update({"chart": chart, "stream": stream_key, "tpl": tpl})
+            ecg_sweep_state.update(
+                {"chart": chart, "stream": stream_key, "tpl": tpl, "sent_total": 0}
+            )
             return
 
-        frame = player.next_frame(
-            h10_ecg_samples[stream_key],
-            total_samples,
-            sample_rate_hz=sample_rate_hz,
-            force_reset=force_reset,
-        )
-        ecg_sweep_state.update({"chart": chart, "stream": stream_key, "tpl": tpl})
-        if frame is None:
+        if force_reset:
+            _send_custom_message(
+                session,
+                ECG_SWEEP_MESSAGE,
+                build_ecg_sweep_message(
+                    _ECG_SWEEP_PLOT_ID,
+                    op="reset",
+                    samples=list(h10_ecg_samples[stream_key]),
+                    sample_rate_hz=sample_rate_hz,
+                    title=H10_CHARTS["ecg"],
+                    template=tpl,
+                ),
+            )
+            ecg_sweep_state.update(
+                {
+                    "chart": chart,
+                    "stream": stream_key,
+                    "tpl": tpl,
+                    "sent_total": total_samples,
+                }
+            )
             return
 
-        _send_custom_message(
-            session,
-            ECG_SWEEP_MESSAGE,
-            build_ecg_sweep_message(
-                _ECG_SWEEP_PLOT_ID,
-                frame,
-                sample_rate_hz=sample_rate_hz,
-                title=H10_CHARTS["ecg"],
-                template=tpl,
-            ),
+        sent_total = int(ecg_sweep_state.get("sent_total", 0) or 0)
+        pending_chunks = [
+            chunk
+            for chunk in h10_ecg_chunks[stream_key]
+            if int(chunk.get("total_samples", 0) or 0) > sent_total
+        ]
+        if not pending_chunks:
+            ecg_sweep_state.update(
+                {
+                    "chart": chart,
+                    "stream": stream_key,
+                    "tpl": tpl,
+                    "sent_total": sent_total,
+                }
+            )
+            return
+
+        for chunk in pending_chunks:
+            chunk_samples = list(chunk.get("samples_uv", []))
+            if not chunk_samples:
+                continue
+            _send_custom_message(
+                session,
+                ECG_SWEEP_MESSAGE,
+                build_ecg_sweep_message(
+                    _ECG_SWEEP_PLOT_ID,
+                    op="append",
+                    samples=chunk_samples,
+                    sample_rate_hz=int(chunk.get("sample_rate_hz", sample_rate_hz) or sample_rate_hz),
+                    title=H10_CHARTS["ecg"],
+                    template=tpl,
+                ),
+            )
+            sent_total = int(chunk.get("total_samples", sent_total) or sent_total)
+
+        ecg_sweep_state.update(
+            {
+                "chart": chart,
+                "stream": stream_key,
+                "tpl": tpl,
+                "sent_total": sent_total,
+            }
         )
 
     @render_widget

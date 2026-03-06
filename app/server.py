@@ -236,6 +236,7 @@ def server(input, output, session):
     h10_ecg_samples: dict[str, deque] = {
         k: deque(maxlen=_h10_ecg_display_samples) for k in H10_DEVICES
     }
+    h10_ecg_chunks: dict[str, deque] = {k: deque(maxlen=64) for k in H10_DEVICES}
     h10_ecg_sample_rate: dict[str, int] = {k: 130 for k in H10_DEVICES}
     h10_ecg_total_samples: dict[str, int] = {k: 0 for k in H10_DEVICES}
     _h10_acc_default = {
@@ -286,8 +287,16 @@ def server(input, output, session):
         h10_ecg_samples[key].extend(normalized["samples_uv"])
         h10_ecg_sample_rate[key] = normalized["sample_rate_hz"]
         h10_ecg_total_samples[key] += len(normalized["samples_uv"])
+        h10_ecg_chunks[key].append(
+            {
+                "samples_uv": list(normalized["samples_uv"]),
+                "sample_rate_hz": h10_ecg_sample_rate[key],
+                "total_samples": h10_ecg_total_samples[key],
+            }
+        )
         h10_ecg_latest[key].set(
             {
+                "samples_uv": list(normalized["samples_uv"]),
                 "sample_rate_hz": h10_ecg_sample_rate[key],
                 "total_samples": h10_ecg_total_samples[key],
             }
@@ -420,6 +429,7 @@ def server(input, output, session):
         h10_history,
         h10_ecg_latest,
         h10_ecg_samples,
+        h10_ecg_chunks,
         h10_acc_latest,
         h10_acc_history,
         h10_motion_latest,

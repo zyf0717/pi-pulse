@@ -1,32 +1,41 @@
-"""Standalone Plotly sweep helpers for ECG rendering experiments.
-
-This module is intentionally decoupled from the current H10 render path. It
-provides:
-
-- a paced frame player that converts raw sample buffers into display frames
-- a client-side Plotly sweep renderer driven by Shiny custom messages
-- a small message builder so server code only sends new samples
-"""
-
-from __future__ import annotations
-
-from collections import deque
-from dataclasses import dataclass, field
-from time import monotonic
-from typing import Generic, Sequence, TypeVar
-
-T = TypeVar("T")
+"""Standalone Plotly sweep helpers for ECG rendering."""
 
 ECG_SWEEP_MESSAGE = "ecg-sweep"
 ECG_SWEEP_FPS = 30.0
-ECG_SWEEP_WINDOW_SECONDS = 6.0
-ECG_SWEEP_GAP_POINTS = 8
+ECG_SWEEP_WINDOW_SECONDS = 10.0
+ECG_SWEEP_GAP_POINTS = 13.0
+ECG_SWEEP_MAX_PENDING_SECONDS = 1.0
 ECG_SWEEP_Y_RANGE = (-2000.0, 2500.0)
 
 ECG_SWEEP_JS = """
 <script>
 (function () {
   var states = new Map();
+
+  function compactPending(state) {
+    if (state.pendingIndex > 1024 && state.pendingIndex >= state.pendingSamples.length / 2) {
+      state.pendingSamples = state.pendingSamples.slice(state.pendingIndex);
+      state.pendingIndex = 0;
+    }
+  }
+
+  function applySweepGap(state) {
+    for (var gapOffset = 0; gapOffset < state.gapPoints; gapOffset += 1) {
+      state.yValues[(state.cursorIndex + gapOffset) % state.maxPoints] = null;
+    }
+  }
+
+  function drawCurrentState(container, state) {
+    var cursorX = state.xValues[state.cursorIndex] || 0;
+    window.Plotly.restyle(
+      container,
+      {
+        x: [state.xValues, [cursorX, cursorX]],
+        y: [state.yValues, state.yRange]
+      },
+      [0, 1]
+    );
+  }
 
   function ensureHandler() {
     if (!window.Shiny || !window.Plotly) {
@@ -41,6 +50,10 @@ ECG_SWEEP_JS = """
       }
 
       if (msg.op === "clear") {
+        var previousState = states.get(msg.plot_id);
+        if (previousState && previousState.timerId !== null) {
+          window.clearInterval(previousState.timerId);
+        }
         window.Plotly.purge(container);
         container.replaceChildren();
         states.delete(msg.plot_id);
@@ -49,21 +62,39 @@ ECG_SWEEP_JS = """
 
       var state = states.get(msg.plot_id);
       var shouldReset = msg.op === "reset" || !state;
+
       if (shouldReset) {
+        if (state && state.timerId !== null) {
+          window.clearInterval(state.timerId);
+        }
+
+        var templateName = msg.template || "plotly_dark";
+        var isDark = templateName.indexOf("dark") !== -1;
+        var lineColor = msg.line_color || "#636efa";
+        var cursorColor = msg.cursor_color || (isDark ? "#f5f5f5" : "#2f2f2f");
         var maxPoints = msg.max_points;
         var sampleRate = msg.sample_rate_hz;
+        var fps = msg.fps || 30;
         var xValues = [];
         for (var i = 0; i < maxPoints; i += 1) {
           xValues.push(i / sampleRate);
         }
+
         state = {
           sampleRate: sampleRate,
+          fps: fps,
+          frameSamples: sampleRate / fps,
           maxPoints: maxPoints,
+          maxPendingPoints: msg.max_pending_points || (maxPoints * 2),
           gapPoints: msg.gap_points || 8,
           xValues: xValues,
           yValues: Array(maxPoints).fill(null),
           cursorIndex: 0,
-          yRange: msg.y_range || [-2000, 2500]
+          yRange: msg.y_range || [-2000, 2500],
+          pendingSamples: [],
+          pendingIndex: 0,
+          carry: 0.0,
+          timerId: null
         };
         states.set(msg.plot_id, state);
 
@@ -77,7 +108,7 @@ ECG_SWEEP_JS = """
               type: "scattergl",
               name: msg.title || "ECG",
               line: {
-                color: msg.line_color || "#64b5f6",
+                color: lineColor,
                 width: msg.line_width || 2
               },
               hoverinfo: "skip"
@@ -89,7 +120,7 @@ ECG_SWEEP_JS = """
               type: "scattergl",
               name: "Cursor",
               line: {
-                color: msg.cursor_color || "#f5f5f5",
+                color: cursorColor,
                 width: 1
               },
               hoverinfo: "skip",
@@ -97,7 +128,7 @@ ECG_SWEEP_JS = """
             }
           ],
           {
-            template: msg.template || "plotly_dark",
+            template: templateName,
             margin: { l: 20, r: 20, t: 20, b: 20 },
             showlegend: false,
             uirevision: "ecg-sweep",
@@ -117,6 +148,43 @@ ECG_SWEEP_JS = """
             responsive: true
           }
         );
+
+        var initialSamples = Array.isArray(msg.samples) ? msg.samples : [];
+        var startIndex = Math.max(0, initialSamples.length - state.maxPoints);
+        for (var displayIndex = startIndex; displayIndex < initialSamples.length; displayIndex += 1) {
+          state.yValues[state.cursorIndex] = initialSamples[displayIndex];
+          state.cursorIndex = (state.cursorIndex + 1) % state.maxPoints;
+        }
+        applySweepGap(state);
+        drawCurrentState(container, state);
+
+        state.timerId = window.setInterval(function () {
+          var pendingCount = state.pendingSamples.length - state.pendingIndex;
+          if (pendingCount <= 0) {
+            return;
+          }
+
+          var due = state.frameSamples + state.carry;
+          var emitCount = Math.floor(due);
+          state.carry = due - emitCount;
+          if (emitCount <= 0) {
+            emitCount = 1;
+          }
+          if (emitCount > pendingCount) {
+            emitCount = pendingCount;
+          }
+
+          for (var sampleOffset = 0; sampleOffset < emitCount; sampleOffset += 1) {
+            state.yValues[state.cursorIndex] = state.pendingSamples[state.pendingIndex];
+            state.pendingIndex += 1;
+            state.cursorIndex = (state.cursorIndex + 1) % state.maxPoints;
+            applySweepGap(state);
+          }
+
+          compactPending(state);
+          drawCurrentState(container, state);
+        }, 1000 / state.fps);
+        return;
       }
 
       if (!msg.samples || !msg.samples.length) {
@@ -124,22 +192,13 @@ ECG_SWEEP_JS = """
       }
 
       for (var sampleIndex = 0; sampleIndex < msg.samples.length; sampleIndex += 1) {
-        state.yValues[state.cursorIndex] = msg.samples[sampleIndex];
-        for (var gapOffset = 1; gapOffset <= state.gapPoints; gapOffset += 1) {
-          state.yValues[(state.cursorIndex + gapOffset) % state.maxPoints] = null;
-        }
-        state.cursorIndex = (state.cursorIndex + 1) % state.maxPoints;
+        state.pendingSamples.push(msg.samples[sampleIndex]);
       }
-
-      var cursorX = state.xValues[state.cursorIndex] || 0;
-      window.Plotly.restyle(
-        container,
-        {
-          x: [state.xValues, [cursorX, cursorX]],
-          y: [state.yValues, state.yRange]
-        },
-        [0, 1]
-      );
+      var pendingCount = state.pendingSamples.length - state.pendingIndex;
+      if (pendingCount > state.maxPendingPoints) {
+        state.pendingIndex = state.pendingSamples.length - state.maxPendingPoints;
+      }
+      compactPending(state);
     });
   }
 
@@ -149,102 +208,11 @@ ECG_SWEEP_JS = """
 """
 
 
-@dataclass
-class SweepFramePlayer(Generic[T]):
-    sample_rate_hz: float
-    fps: float = ECG_SWEEP_FPS
-    window_seconds: float = ECG_SWEEP_WINDOW_SECONDS
-    idle_reset_s: float = 0.25
-    _pending: deque[T] = field(default_factory=deque, init=False)
-    _carry: float = field(default=0.0, init=False)
-    _last_total: int = field(default=0, init=False)
-    _last_tick: float | None = field(default=None, init=False)
-
-    @property
-    def max_points(self) -> int:
-        return max(1, int(round(self.sample_rate_hz * self.window_seconds)))
-
-    @property
-    def frame_samples(self) -> float:
-        return self.sample_rate_hz / self.fps
-
-    def reset(self) -> None:
-        self._pending.clear()
-        self._carry = 0.0
-        self._last_total = 0
-        self._last_tick = None
-
-    def next_frame(
-        self,
-        source: Sequence[T],
-        total_count: int,
-        *,
-        sample_rate_hz: float | None = None,
-        force_reset: bool = False,
-    ) -> dict[str, object] | None:
-        if (
-            sample_rate_hz is not None
-            and isinstance(sample_rate_hz, (int, float))
-            and not isinstance(sample_rate_hz, bool)
-            and sample_rate_hz > 0
-            and float(sample_rate_hz) != self.sample_rate_hz
-        ):
-            self.sample_rate_hz = float(sample_rate_hz)
-            force_reset = True
-
-        if total_count < self._last_total:
-            force_reset = True
-
-        source_list = list(source)
-        delta = max(0, total_count - self._last_total)
-        if delta:
-            self._pending.extend(source_list[-min(delta, len(source_list)) :])
-            self._last_total = total_count
-
-        now = monotonic()
-        if self._last_tick is None:
-            self._last_tick = now
-            force_reset = True
-
-        elapsed = max(0.0, now - self._last_tick) if self._last_tick is not None else 0.0
-        self._last_tick = now
-
-        if elapsed >= self.idle_reset_s:
-            force_reset = True
-
-        if force_reset:
-            self._pending.clear()
-            self._carry = 0.0
-            tail = source_list[-self.max_points :]
-            self._last_total = total_count
-            return {"op": "reset", "samples": tail}
-
-        if len(self._pending) > self.max_points:
-            self._pending.clear()
-            self._carry = 0.0
-            tail = source_list[-self.max_points :]
-            return {"op": "reset", "samples": tail}
-
-        if not self._pending:
-            return None
-
-        due = self.frame_samples + self._carry
-        emit_count = int(due)
-        self._carry = due - emit_count
-        if emit_count <= 0:
-            emit_count = 1
-
-        emit_count = min(emit_count, len(self._pending))
-        samples = [self._pending.popleft() for _ in range(emit_count)]
-        if not samples:
-            return None
-        return {"op": "append", "samples": samples}
-
-
 def build_ecg_sweep_message(
     plot_id: str,
-    frame: dict[str, object],
     *,
+    op: str,
+    samples: list[int],
     sample_rate_hz: int,
     title: str = "ECG",
     template: str = "plotly_dark",
@@ -252,18 +220,23 @@ def build_ecg_sweep_message(
     y_title: str = "uV",
     window_seconds: float = ECG_SWEEP_WINDOW_SECONDS,
     gap_points: int = ECG_SWEEP_GAP_POINTS,
-    line_color: str = "#64b5f6",
-    cursor_color: str = "#f5f5f5",
+    fps: float = ECG_SWEEP_FPS,
+    max_pending_seconds: float = ECG_SWEEP_MAX_PENDING_SECONDS,
+    line_color: str | None = None,
+    cursor_color: str | None = None,
     line_width: int = 2,
     y_range: tuple[float, float] = ECG_SWEEP_Y_RANGE,
 ) -> dict[str, object]:
     max_points = max(1, int(round(sample_rate_hz * window_seconds)))
+    max_pending_points = max(1, int(round(sample_rate_hz * max_pending_seconds)))
     return {
         "plot_id": plot_id,
-        "op": frame["op"],
-        "samples": frame["samples"],
+        "op": op,
+        "samples": samples,
         "sample_rate_hz": sample_rate_hz,
+        "fps": fps,
         "max_points": max_points,
+        "max_pending_points": max_pending_points,
         "gap_points": gap_points,
         "title": title,
         "template": template,
