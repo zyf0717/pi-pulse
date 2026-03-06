@@ -7,15 +7,6 @@ import sys
 APP_ROOT = Path(__file__).resolve().parents[1]
 
 
-class _FakeTask:
-    def __init__(self, payload):
-        self.payload = payload
-        self.cancel_calls = 0
-
-    def cancel(self) -> None:
-        self.cancel_calls += 1
-
-
 class _FakeFigureWidget:
     def __init__(self, layout=None):
         self.layout = layout
@@ -24,34 +15,11 @@ class _FakeFigureWidget:
 def _load_server_module(monkeypatch):
     calls = {
         "theme_picker_server": 0,
+        "ensure_ingest_started": 0,
         "pulse_register": [],
         "sen66_register": [],
-        "stream_consumer": [],
-        "create_task": [],
+        "h10_register": [],
     }
-
-    fake_config = ModuleType("config")
-    fake_config.DEVICES = {
-        "10": {"label": "10 (192.168.121.10)", "url": "http://pulse-10"}
-    }
-    fake_config.SEN66_DEVICES = {
-        "11": {
-            "label": "11 (192.168.121.11)",
-            "stream": "http://sen66-11",
-            "nc_stream": "http://sen66-11/nc",
-        }
-    }
-    fake_config.H10_DEVICES = {
-        "11:6FFF5628": {
-            "label": "6FFF5628",
-            "device": "11",
-            "h10_id": "6FFF5628",
-            "stream": "http://h10-11",
-            "ecg_stream": "http://h10-11/ecg",
-            "acc_stream": "http://h10-11/acc",
-        }
-    }
-    fake_config.H10_ACC_DYNAMIC_WINDOW_S = 0.5
 
     fake_shinyswatch = ModuleType("shinyswatch")
 
@@ -63,16 +31,6 @@ def _load_server_module(monkeypatch):
     fake_shiny = ModuleType("shiny")
 
     class _Reactive:
-        class Value:
-            def __init__(self, initial):
-                self._value = initial
-
-            def __call__(self):
-                return self._value
-
-            def set(self, value) -> None:
-                self._value = value
-
         @staticmethod
         def calc(fn):
             return fn
@@ -88,11 +46,30 @@ def _load_server_module(monkeypatch):
     fake_app.__path__ = []
     fake_app_renders = ModuleType("app.renders")
     fake_app_renders.__path__ = []
-    fake_app_streams = ModuleType("app.streams")
-    fake_app_streams.__path__ = []
 
-    fake_renders = ModuleType("renders")
-    fake_renders.__path__ = []
+    fake_ingest = ModuleType("app.ingest")
+    fake_ingest.GLOBAL_INGEST = SimpleNamespace(
+        pulse_latest={"10": object()},
+        pulse_temp_history={"10": []},
+        sen66_latest={"11": object()},
+        sen66_nc_latest={"11": object()},
+        sen66_history={"11": []},
+        sen66_nc_history={"11": []},
+        h10_latest={"11:6FFF5628": object()},
+        h10_history={"11:6FFF5628": []},
+        h10_ecg_latest={"11:6FFF5628": object()},
+        h10_ecg_samples={"11:6FFF5628": []},
+        h10_ecg_chunks={"11:6FFF5628": []},
+        h10_acc_latest={"11:6FFF5628": object()},
+        h10_acc_history={"11:6FFF5628": []},
+        h10_motion_latest={"11:6FFF5628": object()},
+    )
+
+    def ensure_global_ingest_started():
+        calls["ensure_ingest_started"] += 1
+        return fake_ingest.GLOBAL_INGEST
+
+    fake_ingest.ensure_global_ingest_started = ensure_global_ingest_started
 
     fake_pulse = ModuleType("app.renders.pulse")
 
@@ -111,21 +88,12 @@ def _load_server_module(monkeypatch):
     fake_h10 = ModuleType("app.renders.h10")
 
     def register_h10_renders(*args) -> None:
-        calls.setdefault("h10_register", []).append(args)
+        calls["h10_register"].append(args)
 
     fake_h10.register_h10_renders = register_h10_renders
 
-    fake_consumer = ModuleType("app.streams.consumer")
-
-    def stream_consumer(label, url, on_data):
-        payload = {"label": label, "url": url, "on_data": on_data}
-        calls["stream_consumer"].append(payload)
-        return payload
-
-    fake_consumer.stream_consumer = stream_consumer
-
     monkeypatch.setitem(sys.modules, "app", fake_app)
-    monkeypatch.setitem(sys.modules, "app.config", fake_config)
+    monkeypatch.setitem(sys.modules, "app.ingest", fake_ingest)
     monkeypatch.setitem(sys.modules, "shinyswatch", fake_shinyswatch)
     monkeypatch.setitem(sys.modules, "shiny", fake_shiny)
     monkeypatch.setitem(sys.modules, "plotly", fake_plotly)
@@ -134,8 +102,6 @@ def _load_server_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "app.renders.pulse", fake_pulse)
     monkeypatch.setitem(sys.modules, "app.renders.sen66", fake_sen66)
     monkeypatch.setitem(sys.modules, "app.renders.h10", fake_h10)
-    monkeypatch.setitem(sys.modules, "app.streams", fake_app_streams)
-    monkeypatch.setitem(sys.modules, "app.streams.consumer", fake_consumer)
 
     module_name = "app.server_under_test"
     sys.modules.pop(module_name, None)
@@ -143,17 +109,7 @@ def _load_server_module(monkeypatch):
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
-
-    def create_task(payload):
-        if hasattr(payload, "close"):
-            payload.close()
-        task = _FakeTask(payload)
-        calls["create_task"].append(task)
-        return task
-
-    monkeypatch.setattr(module.asyncio, "create_task", create_task)
-
-    return module, calls
+    return module, calls, fake_ingest.GLOBAL_INGEST
 
 
 class _FakeInput:
@@ -161,60 +117,21 @@ class _FakeInput:
         return "plotly_dark"
 
 
-class _FakeSession:
-    def __init__(self) -> None:
-        self.ended_callback = None
+def test_server_starts_global_ingest_and_registers_renders(monkeypatch) -> None:
+    server_module, calls, _ = _load_server_module(monkeypatch)
 
-    def on_ended(self, callback) -> None:
-        self.ended_callback = callback
-
-
-def test_server_wires_stream_tasks_and_registers_renders(monkeypatch) -> None:
-    server_module, calls = _load_server_module(monkeypatch)
-    session = _FakeSession()
-
-    server_module.server(_FakeInput(), output=None, session=session)
+    server_module.server(_FakeInput(), output=None, session=object())
 
     assert calls["theme_picker_server"] == 1
-    assert len(calls["stream_consumer"]) == 6
-    assert [call["label"] for call in calls["stream_consumer"]] == [
-        "pulse-10",
-        "sen66-11",
-        "sen66-nc-11",
-        "h10-11:6FFF5628",
-        "h10-ecg-11:6FFF5628",
-        "h10-acc-11:6FFF5628",
-    ]
-    assert [call["url"] for call in calls["stream_consumer"]] == [
-        "http://pulse-10",
-        "http://sen66-11",
-        "http://sen66-11/nc",
-        "http://h10-11",
-        "http://h10-11/ecg",
-        "http://h10-11/acc",
-    ]
-    assert len(calls["create_task"]) == 6
+    assert calls["ensure_ingest_started"] == 1
     assert len(calls["pulse_register"]) == 1
     assert len(calls["sen66_register"]) == 1
     assert len(calls["h10_register"]) == 1
 
 
-def test_server_registers_session_cleanup_that_cancels_all_tasks(monkeypatch) -> None:
-    server_module, calls = _load_server_module(monkeypatch)
-    session = _FakeSession()
-
-    server_module.server(_FakeInput(), output=None, session=session)
-
-    assert session.ended_callback is not None
-
-    session.ended_callback()
-
-    assert [task.cancel_calls for task in calls["create_task"]] == [1, 1, 1, 1, 1, 1]
-
-
-def test_server_initializes_chart_state_for_render_registration(monkeypatch) -> None:
-    server_module, calls = _load_server_module(monkeypatch)
-    session = _FakeSession()
+def test_server_passes_shared_ingest_state_to_render_registration(monkeypatch) -> None:
+    server_module, calls, ingest_state = _load_server_module(monkeypatch)
+    session = object()
 
     server_module.server(_FakeInput(), output=None, session=session)
 
@@ -222,78 +139,40 @@ def test_server_initializes_chart_state_for_render_registration(monkeypatch) -> 
     sen66_args = calls["sen66_register"][0]
     h10_args = calls["h10_register"][0]
 
+    assert pulse_args[1] is ingest_state.pulse_latest
+    assert pulse_args[2] is ingest_state.pulse_temp_history
     assert isinstance(pulse_args[4], _FakeFigureWidget)
     assert pulse_args[5] == {"chart": None, "dev": None, "tpl": None}
+
+    assert sen66_args[1] is ingest_state.sen66_latest
+    assert sen66_args[2] is ingest_state.sen66_nc_latest
+    assert sen66_args[3] is ingest_state.sen66_history
+    assert sen66_args[4] is ingest_state.sen66_nc_history
     assert isinstance(sen66_args[6], _FakeFigureWidget)
     assert sen66_args[7] == {"chart": None, "dev": None, "tpl": None}
+
+    assert h10_args[1] is ingest_state.h10_latest
+    assert h10_args[2] is ingest_state.h10_history
+    assert h10_args[3] is ingest_state.h10_ecg_latest
+    assert h10_args[4] is ingest_state.h10_ecg_samples
+    assert h10_args[5] is ingest_state.h10_ecg_chunks
+    assert h10_args[6] is ingest_state.h10_acc_latest
+    assert h10_args[7] is ingest_state.h10_acc_history
+    assert h10_args[8] is ingest_state.h10_motion_latest
     assert isinstance(h10_args[10], _FakeFigureWidget)
     assert h10_args[11] == {"chart": None, "dev": None, "tpl": None}
     assert h10_args[12] is session
+
+
+def test_server_plotly_template_calc_reads_chart_style(monkeypatch) -> None:
+    server_module, calls, _ = _load_server_module(monkeypatch)
+
+    server_module.server(_FakeInput(), output=None, session=object())
+
+    pulse_args = calls["pulse_register"][0]
+    sen66_args = calls["sen66_register"][0]
+    h10_args = calls["h10_register"][0]
+
     assert pulse_args[0].chart_style() == "plotly_dark"
     assert sen66_args[0].chart_style() == "plotly_dark"
     assert h10_args[0].chart_style() == "plotly_dark"
-
-
-def test_normalize_h10_sample_handles_common_ble_field_names(monkeypatch) -> None:
-    server_module, _ = _load_server_module(monkeypatch)
-
-    normalized = server_module._normalize_h10_sample(
-        {"bpm": 72, "rr": [824, 840], "battery_pct": 95}
-    )
-
-    assert normalized["heart_rate_bpm"] == 72.0
-    assert normalized["rr_intervals_ms"] == [824.0, 840.0]
-    assert normalized["rr_last_ms"] == 840.0
-    assert normalized["rr_avg_ms"] == 832.0
-    assert normalized["rr_count"] == 2
-    assert normalized["battery_pct"] == 95
-
-
-def test_normalize_h10_ecg_chunk_filters_samples_and_defaults_rate(monkeypatch) -> None:
-    server_module, _ = _load_server_module(monkeypatch)
-
-    normalized = server_module._normalize_h10_ecg_chunk(
-        {"samples_uv": [10, 11.9, "bad", True, -5], "sample_rate_hz": 0}
-    )
-
-    assert normalized == {
-        "samples_uv": [10, 11, -5],
-        "sample_rate_hz": 130,
-    }
-
-
-def test_normalize_h10_acc_chunk_filters_invalid_samples_and_defaults_rate(
-    monkeypatch,
-) -> None:
-    server_module, _ = _load_server_module(monkeypatch)
-
-    normalized = server_module._normalize_h10_acc_chunk(
-        {
-            "samples_mg": [
-                {"x_mg": -10, "y_mg": 5.5, "z_mg": 2},
-                {"x_mg": 1, "y_mg": "bad", "z_mg": 3},
-                {"x_mg": True, "y_mg": 1, "z_mg": 3},
-            ],
-            "sample_rate_hz": 0,
-        }
-    )
-
-    assert normalized == {
-        "samples_mg": [{"x_mg": -10.0, "y_mg": 5.5, "z_mg": 2.0}],
-        "sample_rate_hz": 200,
-    }
-
-
-def test_mean_dynamic_acceleration_uses_window_mean_as_static_component(
-    monkeypatch,
-) -> None:
-    server_module, _ = _load_server_module(monkeypatch)
-
-    mean_dynamic = server_module._mean_dynamic_acceleration_mg(
-        [
-            {"x_mg": 0.0, "y_mg": 0.0, "z_mg": 0.0},
-            {"x_mg": 2.0, "y_mg": 0.0, "z_mg": 0.0},
-        ]
-    )
-
-    assert mean_dynamic == 1.0
