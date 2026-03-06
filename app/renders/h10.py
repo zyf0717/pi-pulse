@@ -9,10 +9,7 @@ from shiny import reactive, render, ui
 from shinywidgets import output_widget, render_widget
 
 from app.config import H10_CHARTS, H10_DEFAULTS, H10_DEVICE_OPTIONS, H10_DEVICES
-from app.renders.ecg_sweep import (
-    ECG_SWEEP_MESSAGE,
-    build_ecg_sweep_message,
-)
+from app.renders.ecg_sweep import ECG_SWEEP_MESSAGE, build_ecg_sweep_message
 from app.renders.render_utils import (
     metric_value,
     needs_chart_rebuild,
@@ -330,7 +327,7 @@ def register_h10_renders(
         selected = _selected_h10_stream(input)
         return ui.input_select(
             "h10_device",
-            "H10 stream:",
+            "",
             options,
             selected=selected,
         )
@@ -580,7 +577,9 @@ def register_h10_renders(
                     _ECG_SWEEP_PLOT_ID,
                     op="append",
                     samples=chunk_samples,
-                    sample_rate_hz=int(chunk.get("sample_rate_hz", sample_rate_hz) or sample_rate_hz),
+                    sample_rate_hz=int(
+                        chunk.get("sample_rate_hz", sample_rate_hz) or sample_rate_hz
+                    ),
                     title=H10_CHARTS["ecg"],
                     template=tpl,
                 ),

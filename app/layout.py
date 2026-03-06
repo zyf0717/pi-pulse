@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import shinyswatch
 from faicons import icon_svg
 from shiny import ui
@@ -11,79 +13,10 @@ from app.config import (
     PULSE_CHARTS,
     SEN66_CHARTS,
 )
-from app.renders.ecg_sweep import ECG_SWEEP_JS
 
 _INFO_ICON = icon_svg("circle-info", fill="currentColor", height="1em")
+_WWW_DIR = Path(__file__).resolve().parent / "www"
 _CARD_ATTRS_CLASS = "metric-card-trigger"
-
-# Web Worker keepalive + auto-reload on disconnect
-_KEEPALIVE_JS = """
-<script>
-(function () {
-  // Web Worker runs outside the throttled page context, so Chrome won't suspend it.
-  // It fires a HEAD fetch every 20 s to keep the WebSocket ping/pong alive.
-  var workerCode = 'setInterval(function () { postMessage("ping"); }, 20000);';
-  var blob = new Blob([workerCode], { type: 'application/javascript' });
-  var worker = new Worker(URL.createObjectURL(blob));
-  worker.onmessage = function () {
-    fetch(window.location.href, { method: 'HEAD', cache: 'no-store' }).catch(function () {});
-  };
-
-  // If the Shiny WebSocket closes for any reason, reload the page after 2 s.
-  // This recovers from background-tab throttling that outlasts the server ping timeout.
-  document.addEventListener('shiny:disconnected', function () {
-    setTimeout(function () { window.location.reload(); }, 2000);
-  });
-})();
-</script>
-"""
-
-_CARD_CLICK_JS = """
-<script>
-(function () {
-  function findMetricCardTrigger(node) {
-    while (node) {
-      if (node.classList && node.classList.contains("metric-card-trigger")) {
-        return node;
-      }
-      node = node.parentNode;
-    }
-    return null;
-  }
-
-  function activateMetricCard(node) {
-    var targetId = node.getAttribute("data-chart-target");
-    var nextValue = node.getAttribute("data-chart-value");
-    var select = document.getElementById(targetId);
-    if (!select || select.value === nextValue) {
-      return;
-    }
-    select.value = nextValue;
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-  }
-
-  document.addEventListener("click", function (event) {
-    var trigger = findMetricCardTrigger(event.target);
-    if (!trigger) {
-      return;
-    }
-    activateMetricCard(trigger);
-  });
-
-  document.addEventListener("keydown", function (event) {
-    if (event.key !== "Enter" && event.key !== " ") {
-      return;
-    }
-    var trigger = findMetricCardTrigger(event.target);
-    if (!trigger) {
-      return;
-    }
-    event.preventDefault();
-    activateMetricCard(trigger);
-  });
-})();
-</script>
-"""
 
 _PULSE_CARD_SPECS = [
     ("CPU Usage", "cpu_val", "cpu_spark", "cpu"),
@@ -330,12 +263,15 @@ def _h10_panel():
         ui.br(),
         ui.layout_column_wrap(*_h10_cards(), fill=False),
         ui.hr(),
-        ui.output_ui("h10_device_selector"),
-        ui.input_select(
-            "h10_chart",
-            "",
-            H10_CHARTS,
-            selected="bpm",
+        ui.div(
+            ui.output_ui("h10_device_selector"),
+            ui.input_select(
+                "h10_chart",
+                "",
+                H10_CHARTS,
+                selected="bpm",
+            ),
+            class_="d-flex flex-wrap align-items-end gap-3 justify-content-start",
         ),
         ui.output_ui("h10_detail_view"),
     )
@@ -361,9 +297,12 @@ app_ui = ui.page_sidebar(
         ),
         width=220,
     ),
-    ui.HTML(_KEEPALIVE_JS),
-    ui.HTML(_CARD_CLICK_JS),
-    ui.HTML(ECG_SWEEP_JS),
+    ui.head_content(
+        ui.include_css(_WWW_DIR / "app.css"),
+        ui.include_js(_WWW_DIR / "keepalive.js"),
+        ui.include_js(_WWW_DIR / "card-click.js"),
+        ui.include_js(_WWW_DIR / "ecg-sweep.js"),
+    ),
     ui.navset_tab(
         _system_panel(),
         _sen66_panel(),

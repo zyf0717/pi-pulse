@@ -16,11 +16,13 @@ def _tag_factory(name: str):
 def _load_layout_module(monkeypatch):
     fake_ui = SimpleNamespace(
         page_sidebar=_tag_factory("page_sidebar"),
+        head_content=_tag_factory("head_content"),
         sidebar=_tag_factory("sidebar"),
+        include_css=_tag_factory("include_css"),
+        include_js=_tag_factory("include_js"),
         input_select=_tag_factory("input_select"),
         hr=_tag_factory("hr"),
         input_radio_buttons=_tag_factory("input_radio_buttons"),
-        HTML=_tag_factory("HTML"),
         navset_tab=_tag_factory("navset_tab"),
         nav_panel=_tag_factory("nav_panel"),
         br=_tag_factory("br"),
@@ -57,8 +59,6 @@ def _load_layout_module(monkeypatch):
     fake_app_renders = ModuleType("app.renders")
     fake_app_renders.__path__ = []
     fake_config = ModuleType("app.config")
-    fake_ecg_sweep = ModuleType("app.renders.ecg_sweep")
-    fake_ecg_sweep.ECG_SWEEP_JS = "<script>ecg-sweep</script>"
     fake_config.ALL_DEVICES = {"10": "10 (192.168.121.10)", "11": "11 (192.168.121.11)"}
     fake_config.ALL_DEVICES_DEFAULT = "11"
     fake_config.H10_ACC_DYNAMIC_WINDOW_S = 0.5
@@ -91,7 +91,6 @@ def _load_layout_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "app", fake_app)
     monkeypatch.setitem(sys.modules, "app.renders", fake_app_renders)
     monkeypatch.setitem(sys.modules, "app.config", fake_config)
-    monkeypatch.setitem(sys.modules, "app.renders.ecg_sweep", fake_ecg_sweep)
 
     module_name = "app.layout_under_test"
     sys.modules.pop(module_name, None)
@@ -194,21 +193,32 @@ def test_h10_panel_includes_stream_selector_placeholder(monkeypatch) -> None:
     module = _load_layout_module(monkeypatch)
 
     panel = module._h10_panel()
+    control_row = next(
+        item
+        for item in panel["args"]
+        if isinstance(item, dict)
+        and item["tag"] == "div"
+        and item["kwargs"].get("class_")
+        == "d-flex flex-wrap align-items-end gap-3 justify-content-start"
+    )
 
     assert panel["tag"] == "nav_panel"
     assert any(
         item["tag"] == "output_ui" and item["args"] == ("h10_device_selector",)
-        for item in panel["args"]
+        for item in control_row["args"]
         if isinstance(item, dict)
     )
 
 
-def test_card_click_script_updates_existing_selects(monkeypatch) -> None:
+def test_app_ui_includes_static_assets(monkeypatch) -> None:
     module = _load_layout_module(monkeypatch)
 
-    assert 'classList.contains("metric-card-trigger")' in module._CARD_CLICK_JS
-    assert "node = node.parentNode" in module._CARD_CLICK_JS
-    assert 'getAttribute("data-chart-target")' in module._CARD_CLICK_JS
-    assert (
-        'dispatchEvent(new Event("change", { bubbles: true }))' in module._CARD_CLICK_JS
-    )
+    head = module.app_ui["args"][1]
+
+    assert head["tag"] == "head_content"
+    asset_tags = [item["tag"] for item in head["args"] if isinstance(item, dict)]
+    assert asset_tags == ["include_css", "include_js", "include_js", "include_js"]
+    assert str(head["args"][0]["args"][0]).endswith("app/www/app.css")
+    assert str(head["args"][1]["args"][0]).endswith("app/www/keepalive.js")
+    assert str(head["args"][2]["args"][0]).endswith("app/www/card-click.js")
+    assert str(head["args"][3]["args"][0]).endswith("app/www/ecg-sweep.js")
