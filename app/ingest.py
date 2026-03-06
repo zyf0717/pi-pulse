@@ -1,6 +1,7 @@
 """Process-global SSE ingest state and startup for the Pi-Pulse app."""
 
 import asyncio
+import logging
 import math
 import threading
 import time
@@ -12,6 +13,8 @@ from shiny import reactive
 
 from app.config import DEVICES, H10_ACC_DYNAMIC_WINDOW_S, H10_DEVICES, SEN66_DEVICES
 from app.streams.consumer import stream_consumer
+
+log = logging.getLogger(__name__)
 
 
 def _first_numeric(data: dict, *keys: str, default: float = 0.0) -> float:
@@ -353,7 +356,7 @@ async def _on_h10_acc(state: IngestState, key: str, data: dict) -> None:
 
 
 def _create_stream_tasks(state: IngestState) -> list:
-    return (
+    tasks = (
         [
             asyncio.create_task(
                 stream_consumer(
@@ -417,15 +420,57 @@ def _create_stream_tasks(state: IngestState) -> list:
             if device.get("acc_stream")
         ]
     )
+    for task in tasks:
+        task.add_done_callback(lambda task, state=state: _on_consumer_done(state, task))
+    return tasks
+
+
+def _reset_task_set(state: IngestState) -> None:
+    for task in state.tasks:
+        if not task.done():
+            task.cancel()
+    state.tasks = []
+    state.started = False
+
+
+def _on_consumer_done(state: IngestState, task) -> None:
+    if task.cancelled():
+        return
+
+    try:
+        exc = task.exception()
+    except Exception:
+        exc = None
+
+    if exc is not None:
+        log.error(
+            "Global ingest consumer exited unexpectedly; invalidating task set",
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+    else:
+        log.warning("Global ingest consumer exited unexpectedly without an exception; invalidating task set")
+
+    with state.start_lock:
+        if task not in state.tasks:
+            return
+        _reset_task_set(state)
+
+
+def _task_set_is_healthy(state: IngestState) -> bool:
+    return state.started and bool(state.tasks) and all(not task.done() for task in state.tasks)
 
 
 def ensure_global_ingest_started(state: IngestState = GLOBAL_INGEST) -> IngestState:
-    if state.started:
+    if _task_set_is_healthy(state):
         return state
 
     with state.start_lock:
-        if state.started:
+        if _task_set_is_healthy(state):
             return state
+        if state.started or state.tasks:
+            log.warning("Restarting global ingest consumer set")
+            _reset_task_set(state)
         state.tasks = _create_stream_tasks(state)
         state.started = True
+        log.info("Started global ingest consumer set with %d task(s)", len(state.tasks))
         return state

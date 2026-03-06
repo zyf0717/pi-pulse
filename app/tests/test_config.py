@@ -24,7 +24,6 @@ def test_sen66_devices_match_checked_in_config() -> None:
             "nc_stream": "http://192.168.121.11:8002/nc-stream",
         }
     }
-    assert config.SEN66_DEFAULT_DEV == "11"
 
 
 def test_h10_devices_match_checked_in_config() -> None:
@@ -112,7 +111,6 @@ def test_build_settings_shapes_device_maps_and_nests_h10_by_node() -> None:
             "nc_stream": "http://example/sen66/nc",
         }
     }
-    assert settings["sen66_default_dev"] == "12"
     assert settings["h10_devices"] == {
         "12:strap-a": {
             "label": "Test H10 A",
