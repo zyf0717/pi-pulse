@@ -226,9 +226,9 @@ def test_server_initializes_chart_state_for_render_registration(monkeypatch) -> 
     assert pulse_args[5] == {"chart": None, "dev": None, "tpl": None}
     assert isinstance(sen66_args[6], _FakeFigureWidget)
     assert sen66_args[7] == {"chart": None, "dev": None, "tpl": None}
-    assert isinstance(h10_args[9], _FakeFigureWidget)
-    assert h10_args[10] == {"chart": None, "dev": None, "tpl": None}
-    assert h10_args[11] is session
+    assert isinstance(h10_args[10], _FakeFigureWidget)
+    assert h10_args[11] == {"chart": None, "dev": None, "tpl": None}
+    assert h10_args[12] is session
     assert pulse_args[0].chart_style() == "plotly_dark"
     assert sen66_args[0].chart_style() == "plotly_dark"
     assert h10_args[0].chart_style() == "plotly_dark"
