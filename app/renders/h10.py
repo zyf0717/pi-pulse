@@ -36,7 +36,6 @@ _H10_FIELDS = {
     "rr": "rr_last_ms",
     "acc_dyn": "mean_dynamic_accel_mg",
 }
-_ECG_Y_RANGE = [-2000, 2500]
 _ECG_SWEEP_PLOT_ID = "h10_ecg_sweep"
 _TILT_AXIS_LIMIT_MG = 1500.0
 
@@ -254,13 +253,6 @@ def _apply_h10_layout(h10_widget: go.FigureWidget, chart: str, tpl: str) -> None
     elif chart == "acc_dyn":
         h10_widget.layout.yaxis = dict(title="mg")
         h10_widget.layout.xaxis = {}
-    else:
-        h10_widget.layout.yaxis = dict(
-            title="µV",
-            range=list(_ECG_Y_RANGE),
-            fixedrange=True,
-        )
-        h10_widget.layout.xaxis = dict(title="Seconds")
 
 
 def _rebuild_h10_chart(
@@ -274,19 +266,6 @@ def _rebuild_h10_chart(
 ) -> None:
     h10_widget.data = []
     _apply_h10_layout(h10_widget, chart, tpl)
-    if chart == "ecg":
-        sample_rate_hz = int(data_rows[-1].get("sample_rate_hz", 130) or 130)
-        y_data = list(data_rows[-1].get("samples_uv", []))
-        x_data = _ecg_time_axis(len(y_data), sample_rate_hz)
-        h10_widget.add_scatter(
-            x=x_data,
-            y=y_data,
-            mode="lines",
-            name=H10_CHARTS[chart],
-        )
-        h10_state.update({"chart": chart, "dev": dev, "tpl": tpl})
-        return
-
     field = _H10_FIELDS[chart]
     h10_widget.add_scatter(
         x=times,
@@ -303,25 +282,9 @@ def _update_h10_chart_data(
     times: list,
     data_rows: list[dict],
 ) -> None:
-    if chart == "ecg":
-        sample_rate_hz = int(data_rows[-1].get("sample_rate_hz", 130) or 130)
-        y_data = list(data_rows[-1].get("samples_uv", []))
-        h10_widget.data[0].x = _ecg_time_axis(len(y_data), sample_rate_hz)
-        h10_widget.data[0].y = y_data
-        return
-
     field = _H10_FIELDS[chart]
     h10_widget.data[0].x = times
     h10_widget.data[0].y = [row.get(field, 0.0) for row in data_rows]
-
-
-def _ecg_time_axis(sample_count: int, sample_rate_hz: int) -> list[float]:
-    if sample_count <= 0:
-        return []
-    if sample_rate_hz <= 0:
-        sample_rate_hz = 130
-    end_offset = (sample_count - 1) / sample_rate_hz
-    return [(index / sample_rate_hz) - end_offset for index in range(sample_count)]
 
 
 def _send_custom_message(session, name: str, payload: dict) -> None:
@@ -532,7 +495,6 @@ def register_h10_renders(
         tpl = plotly_tpl()
 
         if chart != "ecg" or stream_key is None:
-            previous_stream = ecg_sweep_state["stream"]
             if ecg_sweep_state["chart"] == "ecg":
                 _send_custom_message(
                     session,

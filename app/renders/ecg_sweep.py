@@ -150,18 +150,22 @@ ECG_SWEEP_JS = """
           ],
           {
             template: templateConfig,
-            margin: { l: 20, r: 20, t: 20, b: 20 },
+            margin: { l: 64, r: 20, t: 20, b: 56 },
             showlegend: false,
             uirevision: "ecg-sweep",
             xaxis: {
-              title: msg.x_title || "Seconds",
               range: [0, state.xValues[state.xValues.length - 1] || 1],
-              fixedrange: true
+              fixedrange: true,
+              automargin: true
             },
             yaxis: {
-              title: msg.y_title || "uV",
+              title: {
+                text: msg.y_title || "Amplitude (\u00b5V)",
+                standoff: 12
+              },
               range: state.yRange,
-              fixedrange: true
+              fixedrange: true,
+              automargin: true
             }
           },
           {
@@ -237,8 +241,8 @@ def build_ecg_sweep_message(
     sample_rate_hz: int,
     title: str = "ECG",
     template: str = "plotly_dark",
-    x_title: str = "Seconds",
-    y_title: str = "uV",
+    x_title: str = "",
+    y_title: str = "Amplitude (\u00b5V)",
     window_seconds: float = ECG_SWEEP_WINDOW_SECONDS,
     gap_points: int = ECG_SWEEP_GAP_POINTS,
     fps: float = ECG_SWEEP_FPS,
