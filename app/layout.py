@@ -17,6 +17,7 @@ from app.config import (
 _INFO_ICON = icon_svg("circle-info", fill="currentColor", height="1em")
 _WWW_DIR = Path(__file__).resolve().parent / "www"
 _CARD_ATTRS_CLASS = "metric-card-trigger"
+_CARD_BODY_CLASS = "metric-card-body"
 
 _PULSE_CARD_SPECS = [
     ("CPU Usage", "cpu_val", "cpu_spark", "cpu"),
@@ -43,6 +44,27 @@ _H10_CARD_SPECS = [
 ]
 
 
+def _clickable_card(
+    header_content,
+    *body_children,
+    chart_target: str,
+    chart_value: str,
+):
+    return ui.div(
+        ui.card(
+            ui.card_header(header_content),
+            ui.div(*body_children, class_=_CARD_BODY_CLASS),
+        ),
+        **{
+            "class": _CARD_ATTRS_CLASS,
+            "role": "button",
+            "tabindex": "0",
+            "data-chart-target": chart_target,
+            "data-chart-value": chart_value,
+        },
+    )
+
+
 def _metric_card(
     header_content,
     value_output_id: str,
@@ -51,23 +73,12 @@ def _metric_card(
     chart_target: str,
     chart_value: str,
 ):
-    return ui.div(
-        ui.card(
-            ui.card_header(header_content),
-            ui.div(
-                ui.div(ui.output_text(value_output_id), class_="fs-3 fw-bold p-2"),
-                ui.output_ui(spark_output_id),
-                style="pointer-events:none;",
-            ),
-        ),
-        **{
-            "class": _CARD_ATTRS_CLASS,
-            "role": "button",
-            "tabindex": "0",
-            "style": "cursor:pointer;",
-            "data-chart-target": chart_target,
-            "data-chart-value": chart_value,
-        },
+    return _clickable_card(
+        header_content,
+        ui.div(ui.output_text(value_output_id), class_="fs-3 fw-bold p-2"),
+        ui.output_ui(spark_output_id),
+        chart_target=chart_target,
+        chart_value=chart_value,
     )
 
 
@@ -78,22 +89,11 @@ def _visual_card(
     chart_target: str,
     chart_value: str,
 ):
-    return ui.div(
-        ui.card(
-            ui.card_header(header_content),
-            ui.div(
-                ui.output_ui(preview_output_id),
-                style="pointer-events:none;",
-            ),
-        ),
-        **{
-            "class": _CARD_ATTRS_CLASS,
-            "role": "button",
-            "tabindex": "0",
-            "style": "cursor:pointer;",
-            "data-chart-target": chart_target,
-            "data-chart-value": chart_value,
-        },
+    return _clickable_card(
+        header_content,
+        ui.output_ui(preview_output_id),
+        chart_target=chart_target,
+        chart_value=chart_value,
     )
 
 

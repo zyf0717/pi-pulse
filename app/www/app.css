@@ -1,3 +1,7 @@
 .metric-card-trigger .card {
   cursor: pointer;
 }
+
+.metric-card-body {
+  pointer-events: none;
+}

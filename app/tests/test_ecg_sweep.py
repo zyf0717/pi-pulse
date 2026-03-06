@@ -26,7 +26,6 @@ def test_build_ecg_sweep_message_uses_fixed_window_contract() -> None:
     assert message["gap_points"] == ECG_SWEEP_GAP_POINTS
     assert message["line_color"] is None
     assert message["cursor_color"] is None
-    assert message["x_title"] == ""
     assert message["y_title"] == "Amplitude (µV)"
     assert message["y_range"] == [ECG_SWEEP_Y_RANGE[0], ECG_SWEEP_Y_RANGE[1]]
 

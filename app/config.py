@@ -81,7 +81,6 @@ def build_settings(raw_config: Mapping) -> dict:
     return {
         "devices": pulse_devices,
         "sen66_devices": sen66_devices,
-        "sen66_default_dev": next(iter(sen66_devices), None),
         "h10_devices": h10_devices,
         "h10_device_options": h10_device_options,
         "h10_defaults": h10_defaults,
@@ -94,7 +93,6 @@ _SETTINGS = build_settings(load_raw_config())
 
 DEVICES = _SETTINGS["devices"]
 SEN66_DEVICES = _SETTINGS["sen66_devices"]
-SEN66_DEFAULT_DEV = _SETTINGS["sen66_default_dev"]
 H10_DEVICES = _SETTINGS["h10_devices"]
 H10_DEVICE_OPTIONS = _SETTINGS["h10_device_options"]
 H10_DEFAULTS = _SETTINGS["h10_defaults"]

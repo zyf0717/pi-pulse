@@ -10,6 +10,34 @@ APP_ROOT = Path(__file__).resolve().parents[1]
 class _FakeTask:
     def __init__(self, payload):
         self.payload = payload
+        self._done = False
+        self._cancelled = False
+        self._exception = None
+        self._callbacks = []
+        self.cancel_calls = 0
+
+    def add_done_callback(self, callback) -> None:
+        self._callbacks.append(callback)
+
+    def done(self) -> bool:
+        return self._done
+
+    def cancelled(self) -> bool:
+        return self._cancelled
+
+    def cancel(self) -> None:
+        self.cancel_calls += 1
+        self._cancelled = True
+        self._done = True
+
+    def exception(self):
+        return self._exception
+
+    def finish(self, exception=None) -> None:
+        self._exception = exception
+        self._done = True
+        for callback in list(self._callbacks):
+            callback(self)
 
 
 def _load_ingest_module(monkeypatch):
@@ -118,6 +146,27 @@ def test_ensure_global_ingest_started_starts_consumers_once(monkeypatch) -> None
         "http://h10-11/acc",
     ]
     assert len(calls["create_task"]) == 6
+
+
+def test_dead_consumer_invalidates_task_set_and_next_ensure_restarts(monkeypatch) -> None:
+    ingest_module, calls = _load_ingest_module(monkeypatch)
+    state = ingest_module.build_ingest_state()
+
+    ingest_module.ensure_global_ingest_started(state)
+    first_generation = list(state.tasks)
+
+    first_generation[0].finish(RuntimeError("boom"))
+
+    assert state.started is False
+    assert state.tasks == []
+    assert all(task.cancel_calls == 1 for task in first_generation[1:])
+
+    ingest_module.ensure_global_ingest_started(state)
+
+    assert state.started is True
+    assert len(state.tasks) == 6
+    assert state.tasks != first_generation
+    assert len(calls["create_task"]) == 12
 
 
 def test_normalize_h10_sample_handles_common_ble_field_names(monkeypatch) -> None:
