@@ -15,7 +15,8 @@ Pi-side deployment is documented separately in [../rpi4/README.md](../rpi4/READM
 
 - [pi_pulse.py](pi_pulse.py): app entry point, runs Shiny on `127.0.0.1:8009`
 - [layout.py](layout.py): UI structure and static asset inclusion
-- [server.py](server.py): reactive state, stream consumers, and render registration
+- [server.py](server.py): session-local render registration
+- [ingest.py](ingest.py): process-global SSE ingest state, normalization, and startup
 - [config.py](config.py): parses [config.yaml](config.yaml) into app-facing settings
 
 ## Config Model
@@ -67,10 +68,36 @@ The app binds to `127.0.0.1:8009`.
 Runtime flow:
 
 1. [config.py](config.py) loads [config.yaml](config.yaml) and builds `DEVICES`, `SEN66_DEVICES`, `H10_DEVICES`, and selector metadata.
-2. [server.py](server.py) starts one SSE consumer per configured upstream stream using [streams/consumer.py](streams/consumer.py).
-3. Incoming payloads are normalized and written into small bounded `deque` histories plus `reactive.Value` state.
-4. Render modules under `renders/` read from that state and update cards, charts, and motion views.
-5. ECG is handled differently: the server forwards raw ECG chunks and the browser paces and draws the sweep client-side.
+2. [ingest.py](ingest.py) owns one process-global ingest set and starts one SSE consumer per configured upstream stream using [streams/consumer.py](streams/consumer.py).
+3. Incoming payloads are normalized and written into small bounded `deque` histories plus `reactive.Value` state shared by all browser sessions in that app process.
+4. [server.py](server.py) does not open per-session upstream streams; it only binds the active Shiny session to the shared ingest state and registers renders.
+5. Render modules under `renders/` read from that shared state and update cards, charts, and motion views.
+6. ECG is handled differently: the app forwards raw ECG chunks to the browser, and the browser paces and draws the sweep client-side.
+
+If the shared ingest task set becomes unhealthy, `ingest.py` invalidates it and recreates the full set on the next startup check instead of trusting a stale `started=True` flag.
+
+## Major Refactors
+
+The current app structure reflects a few deliberate architecture changes:
+
+- Node-centric config:
+  `config.yaml` is organized by Pi node, not by sensor type. One node can have one `pulse`, one `sen66`, and multiple `h10` streams.
+
+- Process-global ingest:
+  upstream SSE connections are shared per app process. Opening additional browser sessions no longer creates additional upstream streams.
+
+- Client-driven ECG:
+  ECG is no longer rendered as repeated Python-side Plotly array replacement. The browser owns the sweep buffer and pacing, and the server only forwards raw ECG chunks.
+
+- Split H10 rendering:
+  the H10 render path is separated by concern:
+  - [renders/h10.py](renders/h10.py): session render registration and standard H10 charts
+  - [renders/h10_motion.py](renders/h10_motion.py): acceleration SVG rendering
+  - [renders/h10_ecg_bridge.py](renders/h10_ecg_bridge.py): server-to-browser ECG message bridge
+  - [renders/ecg_sweep.py](renders/ecg_sweep.py): ECG sweep message contract
+
+- Extracted frontend assets:
+  the main custom browser behaviors live in `app/www/` instead of large inline JS/CSS strings in Python.
 
 ## Stream Expectations
 
