@@ -72,6 +72,82 @@ Runtime flow:
 4. Render modules under `renders/` read from that state and update cards, charts, and motion views.
 5. ECG is handled differently: the server forwards raw ECG chunks and the browser paces and draws the sweep client-side.
 
+## Stream Expectations
+
+All upstream services publish JSON over Server-Sent Events.
+
+Expected payload shapes:
+
+System metrics:
+
+```json
+{
+  "cpu": 45.2,
+  "mem": 62.1,
+  "temp": 52.5,
+  "cpu_freq_avg_mhz": 1200,
+  "net_rx_bps_total": 5242880,
+  "net_tx_bps_total": 1048576
+}
+```
+
+SEN66 main stream:
+
+```json
+{
+  "temperature_c": 22.5,
+  "humidity_rh": 45.3,
+  "co2_ppm": 520,
+  "voc_index": 35,
+  "nox_index": 25,
+  "pm1_0_ugm3": 2.1,
+  "pm2_5_ugm3": 5.3,
+  "pm4_0_ugm3": 8.2,
+  "pm10_0_ugm3": 10.5
+}
+```
+
+SEN66 number-concentration stream:
+
+```json
+{
+  "nc_pm0_5_pcm3": 1200.0,
+  "nc_pm1_0_pcm3": 950.0,
+  "nc_pm2_5_pcm3": 100.0,
+  "nc_pm4_0_pcm3": 25.0,
+  "nc_pm10_0_pcm3": 5.0
+}
+```
+
+H10 HR stream:
+
+```json
+{
+  "heart_rate_bpm": 72,
+  "rr_intervals_ms": [824, 840]
+}
+```
+
+H10 ECG stream:
+
+```json
+{
+  "samples_uv": [10, 12, 8, -4],
+  "sample_rate_hz": 130
+}
+```
+
+H10 ACC stream:
+
+```json
+{
+  "samples_mg": [
+    {"x_mg": -10, "y_mg": 5, "z_mg": 998}
+  ],
+  "sample_rate_hz": 200
+}
+```
+
 ## Frontend Assets
 
 The dashboard includes a small amount of static JS and CSS under `www/`:
