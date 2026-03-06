@@ -54,7 +54,11 @@ def _load_layout_module(monkeypatch):
 
     fake_app = ModuleType("app")
     fake_app.__path__ = []
+    fake_app_renders = ModuleType("app.renders")
+    fake_app_renders.__path__ = []
     fake_config = ModuleType("app.config")
+    fake_ecg_sweep = ModuleType("app.renders.ecg_sweep")
+    fake_ecg_sweep.ECG_SWEEP_JS = "<script>ecg-sweep</script>"
     fake_config.ALL_DEVICES = {"10": "10 (192.168.121.10)", "11": "11 (192.168.121.11)"}
     fake_config.ALL_DEVICES_DEFAULT = "11"
     fake_config.H10_ACC_DYNAMIC_WINDOW_S = 0.5
@@ -85,7 +89,9 @@ def _load_layout_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "faicons", fake_faicons)
     monkeypatch.setitem(sys.modules, "shinywidgets", fake_shinywidgets)
     monkeypatch.setitem(sys.modules, "app", fake_app)
+    monkeypatch.setitem(sys.modules, "app.renders", fake_app_renders)
     monkeypatch.setitem(sys.modules, "app.config", fake_config)
+    monkeypatch.setitem(sys.modules, "app.renders.ecg_sweep", fake_ecg_sweep)
 
     module_name = "app.layout_under_test"
     sys.modules.pop(module_name, None)

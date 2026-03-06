@@ -13,6 +13,7 @@ class _Registry:
         self.ui: dict[str, object] = {}
         self.effects: dict[str, object] = {}
         self.widgets: dict[str, object] = {}
+        self.invalidations: list[tuple[float, object]] = []
 
 
 class _FakeRender:
@@ -45,6 +46,9 @@ class _FakeReactive:
     def Effect(self, fn):
         self._registry.effects[fn.__name__] = fn
         return fn
+
+    def invalidate_later(self, delay: float, *, session=None) -> None:
+        self._registry.invalidations.append((delay, session))
 
 
 class _FakeValue:
@@ -85,6 +89,14 @@ class _FakeInput:
 
     def h10_chart(self) -> str:
         return self._h10_chart
+
+
+class _FakeSession:
+    def __init__(self) -> None:
+        self.messages: list[tuple[str, dict]] = []
+
+    def send_custom_message(self, name: str, payload: dict) -> None:
+        self.messages.append((name, payload))
 
 
 class _BatchUpdate:
@@ -151,6 +163,11 @@ def _load_render_module(monkeypatch, filename: str, config_attrs: dict):
     fake_shiny.render = _FakeRender(registry)
     fake_shiny.ui = SimpleNamespace(
         HTML=lambda value: value,
+        div=lambda *args, **kwargs: {
+            "tag": "div",
+            "args": args,
+            "kwargs": kwargs,
+        },
         input_select=lambda *args, **kwargs: {
             "tag": "input_select",
             "args": args,
@@ -185,6 +202,7 @@ def _load_render_module(monkeypatch, filename: str, config_attrs: dict):
         setattr(fake_config, key, value)
 
     fake_sparkline = ModuleType("app.sparkline")
+    fake_ecg_sweep = ModuleType("app.renders.ecg_sweep")
 
     def sparkline(values, fmt=None):
         rendered = [fmt(value) for value in values] if fmt else list(values)
@@ -216,6 +234,40 @@ def _load_render_module(monkeypatch, filename: str, config_attrs: dict):
     fake_render_utils.reset_chart_state = reset_chart_state
     fake_render_utils.needs_chart_rebuild = needs_chart_rebuild
 
+    class _FakeSweepFramePlayer:
+        def __init__(self, sample_rate_hz: float, fps: float = 30.0):
+            self.sample_rate_hz = sample_rate_hz
+            self.fps = fps
+            self.reset_calls = 0
+
+        def reset(self) -> None:
+            self.reset_calls += 1
+
+        def next_frame(
+            self,
+            source,
+            total_count: int,
+            *,
+            sample_rate_hz: float | None = None,
+            force_reset: bool = False,
+        ):
+            samples = list(source)
+            if not samples:
+                return None
+            if force_reset:
+                return {"op": "reset", "samples": samples[-10:]}
+            return {"op": "append", "samples": samples[-4:]}
+
+    def build_ecg_sweep_message(plot_id: str, frame: dict, **kwargs):
+        payload = {"plot_id": plot_id, "op": frame["op"], "samples": frame["samples"]}
+        payload.update(kwargs)
+        return payload
+
+    fake_ecg_sweep.ECG_SWEEP_FPS = 30.0
+    fake_ecg_sweep.ECG_SWEEP_MESSAGE = "ecg-sweep"
+    fake_ecg_sweep.SweepFramePlayer = _FakeSweepFramePlayer
+    fake_ecg_sweep.build_ecg_sweep_message = build_ecg_sweep_message
+
     monkeypatch.setitem(sys.modules, "shiny", fake_shiny)
     monkeypatch.setitem(sys.modules, "shinywidgets", fake_shinywidgets)
     monkeypatch.setitem(sys.modules, "plotly", fake_plotly)
@@ -223,6 +275,7 @@ def _load_render_module(monkeypatch, filename: str, config_attrs: dict):
     monkeypatch.setitem(sys.modules, "app", fake_app)
     monkeypatch.setitem(sys.modules, "app.renders", fake_app_renders)
     monkeypatch.setitem(sys.modules, "app.config", fake_config)
+    monkeypatch.setitem(sys.modules, "app.renders.ecg_sweep", fake_ecg_sweep)
     monkeypatch.setitem(sys.modules, "app.sparkline", fake_sparkline)
     monkeypatch.setitem(sys.modules, "app.renders.render_utils", fake_render_utils)
 
@@ -660,7 +713,7 @@ def test_h10_invalid_device_clears_chart_sets_annotation_and_resets_state(
     assert state == {"chart": None, "dev": None, "tpl": None}
 
 
-def test_h10_ecg_chart_updates_shared_widget(monkeypatch) -> None:
+def test_h10_ecg_chart_streams_sweep_messages(monkeypatch) -> None:
     module, registry = _load_render_module(
         monkeypatch,
         "h10.py",
@@ -682,29 +735,42 @@ def test_h10_ecg_chart_updates_shared_widget(monkeypatch) -> None:
             },
         },
     )
-    widget = _FakeFigureWidget()
+    session = _FakeSession()
 
     module.register_h10_renders(
         _FakeInput(device="11", h10_chart="ecg"),
         {"11": _FakeValue({"heart_rate_bpm": 72.0, "rr_last_ms": 840.0})},
         {"11": deque()},
-        {"11": _FakeValue({"samples_uv": [10, 20, 30], "sample_rate_hz": 130})},
-        {"11": deque([10, 20, 30])},
+        {"11": _FakeValue({"sample_rate_hz": 130, "total_samples": 73})},
+        {"11": deque([10, 20, 30, 40, 50, 60])},
         {"11": _FakeValue({"mean_dynamic_accel_mg": 18.4, "sample_rate_hz": 200})},
         {"11": deque([(None, {"mean_dynamic_accel_mg": 18.4})])},
         {"11": _FakeValue({"trail_points": []})},
         lambda: "plotly_dark",
-        widget,
+        _FakeFigureWidget(),
         {"chart": None, "dev": None, "tpl": None},
+        session,
     )
 
-    registry.effects["_update_h10_chart"]()
+    detail = registry.ui["h10_detail_view"]()
+    registry.effects["_update_h10_ecg_sweep"]()
 
-    assert len(widget.data) == 1
-    assert widget.data[0].y == [10, 20, 30]
-    assert widget.data[0].name == "ECG (µV)"
-    assert widget.layout.yaxis["range"] == [-2000, 2500]
-    assert widget.layout.yaxis["fixedrange"] is True
+    assert detail["tag"] == "div"
+    assert detail["kwargs"]["id"] == "h10_ecg_sweep"
+    assert registry.invalidations[-1][0] == 1 / 30.0
+    assert session.messages == [
+        (
+            "ecg-sweep",
+            {
+                "plot_id": "h10_ecg_sweep",
+                "op": "reset",
+                "samples": [10, 20, 30, 40, 50, 60],
+                "sample_rate_hz": 130,
+                "title": "ECG (µV)",
+                "template": "plotly_dark",
+            },
+        )
+    ]
 
 
 def test_h10_dynamic_accel_chart_uses_per_second_history(monkeypatch) -> None:
