@@ -1,5 +1,7 @@
 """H10 (heart-rate monitor) renders: value boxes and chart."""
 
+import asyncio
+import inspect
 from collections import deque
 
 import plotly.graph_objects as go
@@ -7,6 +9,12 @@ from shiny import reactive, render, ui
 from shinywidgets import output_widget, render_widget
 
 from app.config import H10_CHARTS, H10_DEFAULTS, H10_DEVICE_OPTIONS, H10_DEVICES
+from app.renders.ecg_sweep import (
+    ECG_SWEEP_FPS,
+    ECG_SWEEP_MESSAGE,
+    SweepFramePlayer,
+    build_ecg_sweep_message,
+)
 from app.renders.render_utils import (
     metric_value,
     needs_chart_rebuild,
@@ -31,6 +39,7 @@ _H10_FIELDS = {
     "acc_dyn": "mean_dynamic_accel_mg",
 }
 _ECG_Y_RANGE = [-2000, 2500]
+_ECG_SWEEP_PLOT_ID = "h10_ecg_sweep"
 _TILT_AXIS_LIMIT_MG = 1500.0
 
 
@@ -317,6 +326,17 @@ def _ecg_time_axis(sample_count: int, sample_rate_hz: int) -> list[float]:
     return [(index / sample_rate_hz) - end_offset for index in range(sample_count)]
 
 
+def _send_custom_message(session, name: str, payload: dict) -> None:
+    if session is None:
+        return
+    sender = getattr(session, "send_custom_message", None)
+    if sender is None:
+        return
+    result = sender(name, payload)
+    if inspect.isawaitable(result):
+        asyncio.create_task(result)
+
+
 def register_h10_renders(
     input,
     h10_latest: dict[str, reactive.Value],
@@ -329,8 +349,15 @@ def register_h10_renders(
     plotly_tpl,
     h10_widget: go.FigureWidget,
     h10_state: dict,
+    session=None,
 ) -> None:
     """Register all H10-tab output renders inside the active Shiny session."""
+    ecg_players: dict[str, SweepFramePlayer[int]] = {}
+    ecg_sweep_state: dict[str, str | None] = {
+        "chart": None,
+        "stream": None,
+        "tpl": None,
+    }
 
     @render.ui
     def h10_device_selector():
@@ -460,6 +487,8 @@ def register_h10_renders(
                 return ui.HTML("")
             frame = h10_motion_latest[stream_key]()
             return ui.HTML(_motion_detail_row_svg(frame.get("trail_points", [])))
+        if input.h10_chart() == "ecg":
+            return ui.div(id=_ECG_SWEEP_PLOT_ID, style="width:100%; height:400px;")
         return output_widget("h10_graph")
 
     @reactive.Effect
@@ -472,25 +501,9 @@ def register_h10_renders(
             _reset_h10_chart(h10_widget, h10_state)
             return
 
-        if chart == "motion":
+        if chart in {"motion", "ecg"}:
             return
-
-        if chart == "ecg":
-            ecg_chunk = h10_ecg_latest[stream_key]()
-            samples = list(h10_ecg_samples[stream_key])
-            if not samples:
-                _reset_h10_chart(h10_widget, h10_state)
-                return
-            history = [
-                (
-                    None,
-                    {
-                        "samples_uv": samples,
-                        "sample_rate_hz": ecg_chunk.get("sample_rate_hz", 130),
-                    },
-                )
-            ]
-        elif chart == "acc_dyn":
+        if chart == "acc_dyn":
             h10_acc_latest[stream_key]()
             history = list(h10_acc_history[stream_key])
         else:
@@ -509,6 +522,77 @@ def register_h10_renders(
                 )
             else:
                 _update_h10_chart_data(h10_widget, chart, times, data_rows)
+
+    @reactive.Effect
+    def _update_h10_ecg_sweep():
+        if session is None:
+            return
+
+        chart = input.h10_chart()
+        stream_key = _selected_h10_stream(input)
+        tpl = plotly_tpl()
+
+        if chart != "ecg" or stream_key is None:
+            previous_stream = ecg_sweep_state["stream"]
+            if ecg_sweep_state["chart"] == "ecg":
+                _send_custom_message(
+                    session,
+                    ECG_SWEEP_MESSAGE,
+                    {"plot_id": _ECG_SWEEP_PLOT_ID, "op": "clear"},
+                )
+            if previous_stream in ecg_players:
+                ecg_players[previous_stream].reset()
+            ecg_sweep_state.update({"chart": chart, "stream": stream_key, "tpl": tpl})
+            return
+
+        reactive.invalidate_later(1.0 / ECG_SWEEP_FPS, session=session)
+        ecg_meta = h10_ecg_latest[stream_key]()
+        sample_rate_hz = int(ecg_meta.get("sample_rate_hz", 130) or 130)
+        total_samples = int(
+            ecg_meta.get("total_samples", len(h10_ecg_samples[stream_key])) or 0
+        )
+        player = ecg_players.setdefault(
+            stream_key,
+            SweepFramePlayer(sample_rate_hz=float(sample_rate_hz), fps=ECG_SWEEP_FPS),
+        )
+        force_reset = (
+            ecg_sweep_state["chart"] != "ecg"
+            or ecg_sweep_state["stream"] != stream_key
+            or ecg_sweep_state["tpl"] != tpl
+        )
+
+        if total_samples <= 0 or not h10_ecg_samples[stream_key]:
+            if force_reset:
+                _send_custom_message(
+                    session,
+                    ECG_SWEEP_MESSAGE,
+                    {"plot_id": _ECG_SWEEP_PLOT_ID, "op": "clear"},
+                )
+            player.reset()
+            ecg_sweep_state.update({"chart": chart, "stream": stream_key, "tpl": tpl})
+            return
+
+        frame = player.next_frame(
+            h10_ecg_samples[stream_key],
+            total_samples,
+            sample_rate_hz=sample_rate_hz,
+            force_reset=force_reset,
+        )
+        ecg_sweep_state.update({"chart": chart, "stream": stream_key, "tpl": tpl})
+        if frame is None:
+            return
+
+        _send_custom_message(
+            session,
+            ECG_SWEEP_MESSAGE,
+            build_ecg_sweep_message(
+                _ECG_SWEEP_PLOT_ID,
+                frame,
+                sample_rate_hz=sample_rate_hz,
+                title=H10_CHARTS["ecg"],
+                template=tpl,
+            ),
+        )
 
     @render_widget
     def h10_graph():

@@ -11,6 +11,7 @@ from app.config import (
     PULSE_CHARTS,
     SEN66_CHARTS,
 )
+from app.renders.ecg_sweep import ECG_SWEEP_JS
 
 _INFO_ICON = icon_svg("circle-info", fill="currentColor", height="1em")
 _CARD_ATTRS_CLASS = "metric-card-trigger"
@@ -362,6 +363,7 @@ app_ui = ui.page_sidebar(
     ),
     ui.HTML(_KEEPALIVE_JS),
     ui.HTML(_CARD_CLICK_JS),
+    ui.HTML(ECG_SWEEP_JS),
     ui.navset_tab(
         _system_panel(),
         _sen66_panel(),

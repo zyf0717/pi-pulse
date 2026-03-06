@@ -226,8 +226,8 @@ def server(input, output, session):
     }
     h10_history: dict[str, deque] = {k: deque(maxlen=60) for k in H10_DEVICES}
     _h10_ecg_default = {
-        "samples_uv": [],
         "sample_rate_hz": 130,
+        "total_samples": 0,
     }
     h10_ecg_latest: dict[str, reactive.Value] = {
         k: reactive.Value(dict(_h10_ecg_default)) for k in H10_DEVICES
@@ -237,6 +237,7 @@ def server(input, output, session):
         k: deque(maxlen=_h10_ecg_display_samples) for k in H10_DEVICES
     }
     h10_ecg_sample_rate: dict[str, int] = {k: 130 for k in H10_DEVICES}
+    h10_ecg_total_samples: dict[str, int] = {k: 0 for k in H10_DEVICES}
     _h10_acc_default = {
         "mean_dynamic_accel_mg": 0.0,
         "sample_rate_hz": 200,
@@ -284,10 +285,11 @@ def server(input, output, session):
             return
         h10_ecg_samples[key].extend(normalized["samples_uv"])
         h10_ecg_sample_rate[key] = normalized["sample_rate_hz"]
+        h10_ecg_total_samples[key] += len(normalized["samples_uv"])
         h10_ecg_latest[key].set(
             {
-                "samples_uv": list(h10_ecg_samples[key]),
                 "sample_rate_hz": h10_ecg_sample_rate[key],
+                "total_samples": h10_ecg_total_samples[key],
             }
         )
 
@@ -424,4 +426,5 @@ def server(input, output, session):
         plotly_tpl,
         h10_widget,
         h10_state,
+        session,
     )
