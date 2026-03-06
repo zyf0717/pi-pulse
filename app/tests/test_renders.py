@@ -477,7 +477,7 @@ def test_h10_selector_is_rendered_for_nodes_with_multiple_streams(monkeypatch) -
 
     assert selector["tag"] == "input_select"
     assert selector["args"][0] == "h10_device"
-    assert selector["args"][1] == "H10 stream:"
+    assert selector["args"][1] == ""
     assert selector["args"][2] == {"11:strap-a": "Chest A", "11:strap-b": "Chest B"}
     assert selector["kwargs"]["selected"] == "11:strap-b"
     assert registry.text["h10_bpm_val"]() == "81 bpm"
