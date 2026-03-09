@@ -1,6 +1,7 @@
 import logging
 import os
 import socket
+import time
 from urllib.parse import urlparse
 
 import httpx
@@ -11,6 +12,15 @@ log = logging.getLogger(__name__)
 RELAY_BASE_URL = os.getenv("PI_PULSE_RELAY_URL", "http://192.168.121.1:8010").rstrip("/")
 RELAY_TIMEOUT_S = float(os.getenv("PI_PULSE_RELAY_TIMEOUT_S", "5"))
 RELAY_NODE_ID_ENV = "PI_PULSE_NODE_ID"
+RELAY_BACKOFF_INITIAL_S = float(os.getenv("PI_PULSE_RELAY_BACKOFF_INITIAL_S", "0.5"))
+RELAY_BACKOFF_MAX_S = 5.0
+
+_next_attempt_monotonic = 0.0
+_current_backoff_s = 0.0
+
+
+class RelayBackoffActive(RuntimeError):
+    pass
 
 
 def detect_node_id(relay_base_url: str = RELAY_BASE_URL) -> str:
@@ -43,6 +53,21 @@ def relay_timeout() -> httpx.Timeout:
     return httpx.Timeout(RELAY_TIMEOUT_S)
 
 
+def _reset_backoff_state() -> None:
+    global _next_attempt_monotonic, _current_backoff_s
+    _next_attempt_monotonic = 0.0
+    _current_backoff_s = 0.0
+
+
+def _increase_backoff() -> float:
+    global _current_backoff_s
+    if _current_backoff_s <= 0.0:
+        _current_backoff_s = RELAY_BACKOFF_INITIAL_S
+    else:
+        _current_backoff_s = min(_current_backoff_s * 2.0, RELAY_BACKOFF_MAX_S)
+    return _current_backoff_s
+
+
 async def post_payload(
     client: httpx.AsyncClient,
     path: str,
@@ -50,8 +75,25 @@ async def post_payload(
     *,
     relay_base_url: str = RELAY_BASE_URL,
 ) -> None:
-    response = await client.post(ingest_url(path, relay_base_url), json=payload)
-    response.raise_for_status()
+    global _next_attempt_monotonic
+
+    now = time.monotonic()
+    if now < _next_attempt_monotonic:
+        remaining = _next_attempt_monotonic - now
+        raise RelayBackoffActive(
+            f"relay in backoff for {remaining:.1f}s; discarding stale payload"
+        )
+
+    try:
+        response = await client.post(ingest_url(path, relay_base_url), json=payload)
+        response.raise_for_status()
+    except Exception:
+        delay_s = _increase_backoff()
+        _next_attempt_monotonic = now + delay_s
+        # KIV: route dropped payloads to a DLQ when durable buffering is introduced.
+        raise
+    else:
+        _reset_backoff_state()
 
 
 def log_post_failure(stream_name: str, exc: Exception) -> None:
