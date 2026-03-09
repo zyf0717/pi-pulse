@@ -132,8 +132,13 @@ cmd_install() {
         local unit; unit=$(unit_name "$f")
         info "Enabling  $unit"
         systemctl enable "$unit"
-        info "Starting  $unit"
-        systemctl start  "$unit"
+        if systemctl is-active --quiet "$unit"; then
+            info "Restarting $unit"
+            systemctl restart "$unit"
+        else
+            info "Starting  $unit"
+            systemctl start "$unit"
+        fi
     done
 
     echo
