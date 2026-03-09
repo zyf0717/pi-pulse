@@ -62,7 +62,7 @@ def _reset_backoff_state() -> None:
 def _increase_backoff() -> float:
     global _current_backoff_s
     if _current_backoff_s <= 0.0:
-        _current_backoff_s = RELAY_BACKOFF_INITIAL_S
+        _current_backoff_s = min(RELAY_BACKOFF_INITIAL_S, RELAY_BACKOFF_MAX_S)
     else:
         _current_backoff_s = min(_current_backoff_s * 2.0, RELAY_BACKOFF_MAX_S)
     return _current_backoff_s
