@@ -89,7 +89,8 @@ async def post_payload(
         response.raise_for_status()
     except Exception:
         delay_s = _increase_backoff()
-        _next_attempt_monotonic = now + delay_s
+        failure_time = time.monotonic()
+        _next_attempt_monotonic = failure_time + delay_s
         # KIV: route dropped payloads to a DLQ when durable buffering is introduced.
         raise
     else:
