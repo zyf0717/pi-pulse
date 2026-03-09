@@ -25,7 +25,7 @@
 #   sudo -E ./rpi4/services.sh install pulse sen66  # specific services
 #   sudo -E ./rpi4/services.sh remove h10
 #   sudo -E ./rpi4/services.sh restart
-#            ./rpi4/services.sh status
+#           ./rpi4/services.sh status
 #
 # Placeholder substitution (performed at install time):
 #   ${SERVICE_USER}  — user who owns the repo ($SUDO_USER, or current user)
