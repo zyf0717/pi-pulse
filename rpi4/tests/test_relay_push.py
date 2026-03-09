@@ -48,3 +48,62 @@ def test_ingest_url_joins_paths_cleanly():
         relay_push.ingest_url("/ingest/pulse/10/stream", "http://192.168.121.1:8010")
         == "http://192.168.121.1:8010/ingest/pulse/10/stream"
     )
+
+
+class _FakeResponse:
+    def raise_for_status(self):
+        return None
+
+
+class _RecordingClient:
+    def __init__(self):
+        self.posts = []
+
+    async def post(self, url, json):
+        self.posts.append((url, json))
+        return _FakeResponse()
+
+
+def test_post_payload_sets_backoff_and_skips_during_backoff():
+    relay_push = _load_relay_push()
+    payload = {"ok": True}
+
+    class _FailingClient:
+        async def post(self, url, json):
+            raise RuntimeError("down")
+
+    client = _FailingClient()
+
+    import asyncio
+
+    with patch.object(relay_push.time, "monotonic", return_value=10.0):
+        try:
+            asyncio.run(relay_push.post_payload(client, "/ingest/test", payload))
+            assert False, "expected failure"
+        except RuntimeError:
+            pass
+
+    recording_client = _RecordingClient()
+    with patch.object(relay_push.time, "monotonic", return_value=10.1):
+        try:
+            asyncio.run(relay_push.post_payload(recording_client, "/ingest/test", payload))
+            assert False, "expected backoff"
+        except relay_push.RelayBackoffActive:
+            pass
+
+    assert recording_client.posts == []
+
+
+def test_post_payload_backoff_resets_after_success():
+    relay_push = _load_relay_push()
+    payload = {"ok": True}
+    client = _RecordingClient()
+
+    import asyncio
+
+    with patch.object(relay_push.time, "monotonic", return_value=100.0):
+        asyncio.run(relay_push.post_payload(client, "/ingest/test", payload))
+
+    assert client.posts
+    assert relay_push._current_backoff_s == 0.0
+    assert relay_push._next_attempt_monotonic == 0.0
