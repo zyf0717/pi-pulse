@@ -71,7 +71,7 @@ High-level flow:
 ## Documentation
 
 - [app/README.md](app/README.md): dashboard config, runtime, and tests
-- [rpi4/README.md](rpi4/README.md): Raspberry Pi setup, permissions, relay push config, H10 config, and systemd install
+- [rpi4/README.md](rpi4/README.md): Raspberry Pi setup, permissions, relay push config, local H10 config, and systemd install
 
 ## Install
 

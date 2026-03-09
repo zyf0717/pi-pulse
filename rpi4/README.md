@@ -35,12 +35,16 @@ Log out and back in after changing groups.
 
 ## Configure H10 Devices
 
-H10 straps are configured in [h10_protocol.py](h10_protocol.py):
+H10 straps are configured in a local untracked file:
 
-```python
-H10_ADDRESS: dict[str, str] = {
-    "6FFF5628": "AA:BB:CC:DD:EE:01",
-}
+- `rpi4/h10_addresses.yaml` on the Pi
+- `rpi4/h10_addresses.example.yaml` as the checked-in template
+
+Example local file:
+
+```yaml
+6FFF5628: "AA:BB:CC:DD:EE:01"
+EA78562C: "AA:BB:CC:DD:EE:02"
 ```
 
 Rules:
@@ -48,6 +52,7 @@ Rules:
 - key: stable `device_id` used in the relay routes
 - value: BLE MAC address for that strap
 - one Pi can push multiple H10 straps
+- keep the real `h10_addresses.yaml` out of version control
 
 ## Configure Relay Push Target
 

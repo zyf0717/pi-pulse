@@ -28,14 +28,6 @@ def test_sen66_devices_match_checked_in_config() -> None:
 
 def test_h10_devices_match_checked_in_config() -> None:
     assert config.H10_DEVICES == {
-        "11:6FFF5628": {
-            "label": "6FFF5628",
-            "device": "11",
-            "h10_id": "6FFF5628",
-            "stream": "http://127.0.0.1:8010/h10/6FFF5628/stream",
-            "ecg_stream": "http://127.0.0.1:8010/h10/6FFF5628/ecg-stream",
-            "acc_stream": "http://127.0.0.1:8010/h10/6FFF5628/acc-stream",
-        },
         "11:EA78562C": {
             "label": "EA78562C",
             "device": "11",
@@ -47,11 +39,10 @@ def test_h10_devices_match_checked_in_config() -> None:
     }
     assert config.H10_DEVICE_OPTIONS == {
         "11": {
-            "11:6FFF5628": "6FFF5628",
             "11:EA78562C": "EA78562C",
         }
     }
-    assert config.H10_DEFAULTS == {"11": "11:6FFF5628"}
+    assert config.H10_DEFAULTS == {"11": "11:EA78562C"}
     assert config.H10_ACC_DYNAMIC_WINDOW_S == 0.5
 
 

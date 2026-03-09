@@ -147,4 +147,4 @@ async def h10_acc_stream(device_id: str, max_frames: Optional[int] = None):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host=HOST, port=PORT, reload=False)
+    uvicorn.run(app, host=HOST, port=PORT, reload=False, access_log=False)

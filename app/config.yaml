@@ -10,10 +10,6 @@ devices:
       stream: http://127.0.0.1:8010/sen66/11/stream
       nc-stream: http://127.0.0.1:8010/sen66/11/nc-stream
     h10:
-      "6FFF5628":
-        stream: http://127.0.0.1:8010/h10/6FFF5628/stream
-        ecg-stream: http://127.0.0.1:8010/h10/6FFF5628/ecg-stream
-        acc-stream: http://127.0.0.1:8010/h10/6FFF5628/acc-stream
       "EA78562C":
         stream: http://127.0.0.1:8010/h10/EA78562C/stream
         ecg-stream: http://127.0.0.1:8010/h10/EA78562C/ecg-stream

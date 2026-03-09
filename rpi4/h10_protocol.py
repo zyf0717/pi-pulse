@@ -9,16 +9,38 @@ import asyncio
 import logging
 import struct
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import List
 
 from bleak import BleakClient, BleakError, BleakScanner
+import yaml
 
 log = logging.getLogger(__name__)
 
-H10_ADDRESS: dict[str, str] = {
-    "6FFF5628": "AA:BB:CC:DD:EE:01",
-    "EA78562C": "AA:BB:CC:DD:EE:02",
-}
+_H10_ADDRESS_PATH = Path(__file__).with_name("h10_addresses.yaml")
+_H10_ADDRESS_EXAMPLE_PATH = Path(__file__).with_name("h10_addresses.example.yaml")
+
+
+def load_h10_addresses(
+    config_path: Path = _H10_ADDRESS_PATH,
+    fallback_path: Path = _H10_ADDRESS_EXAMPLE_PATH,
+) -> dict[str, str]:
+    path = config_path if config_path.exists() else fallback_path
+    with path.open() as config_file:
+        raw = yaml.safe_load(config_file) or {}
+
+    if not isinstance(raw, dict):
+        raise ValueError(f"H10 address config must be a mapping: {path}")
+
+    addresses: dict[str, str] = {}
+    for device_id, address in raw.items():
+        if device_id is None or address is None:
+            continue
+        addresses[str(device_id)] = str(address)
+    return addresses
+
+
+H10_ADDRESS: dict[str, str] = load_h10_addresses()
 
 # Standard Bluetooth Heart Rate Measurement characteristic
 HR_MEASUREMENT_UUID = "00002a37-0000-1000-8000-00805f9b34fb"
