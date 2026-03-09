@@ -2,15 +2,18 @@ import asyncio
 import time
 from typing import Any, Dict, Optional, Tuple
 
+import httpx
 import psutil
-from fastapi import FastAPI
 
 try:
-    from sse import encode_sse, sse_response
+    from relay_push import detect_node_id, log_post_failure, post_payload, relay_timeout
 except ImportError:
-    from rpi4.sse import encode_sse, sse_response
-
-app = FastAPI(title="Pi-Pulse Metrics")
+    from rpi4.relay_push import (
+        detect_node_id,
+        log_post_failure,
+        post_payload,
+        relay_timeout,
+    )
 
 
 def read_soc_temp_c() -> Optional[float]:
@@ -33,13 +36,10 @@ def read_soc_temp_c() -> Optional[float]:
         except Exception:
             pass
 
-    # Fallback (may or may not exist depending on config)
     try:
         temps = psutil.sensors_temperatures(fahrenheit=False) or {}
-        # Common Pi key is cpu_thermal; keep it generic if present
         if "cpu_thermal" in temps and temps["cpu_thermal"]:
             return round(float(temps["cpu_thermal"][0].current), 1)
-        # Otherwise try any first available sensor
         for entries in temps.values():
             if entries:
                 return round(float(entries[0].current), 1)
@@ -50,12 +50,9 @@ def read_soc_temp_c() -> Optional[float]:
 
 
 def get_net_totals(pernic: Dict[str, Any]) -> Dict[str, int]:
-    """
-    Sum RX/TX bytes across non-loopback, "up" interfaces when possible.
-    """
-    if_stats: Dict[str, Any] = {}
+    """Sum RX/TX bytes across non-loopback, up interfaces when possible."""
     try:
-        if_stats = psutil.net_if_stats() or {}
+        if_stats: Dict[str, Any] = psutil.net_if_stats() or {}
     except Exception:
         if_stats = {}
 
@@ -75,20 +72,13 @@ def get_net_totals(pernic: Dict[str, Any]) -> Dict[str, int]:
 def collect_metrics(
     last_ts: float, last_net: Dict[str, int]
 ) -> Tuple[Dict[str, Any], float, Dict[str, int]]:
-    """Collect one metrics snapshot.
-
-    Returns (stats_dict, new_timestamp, new_net_totals).
-    Pure synchronous function — directly unit-testable without async machinery.
-    """
+    """Collect one metrics snapshot."""
     now = time.monotonic()
     dt = max(now - last_ts, 1e-6)
 
-    # CPU utilization (non-blocking, computed since last call)
     cpu_total = psutil.cpu_percent(interval=None)
     cpu_per_core = psutil.cpu_percent(interval=None, percpu=True)
 
-    # CPU frequency
-    # On Pi, psutil.cpu_freq(percpu=True) may return per-core or None depending on kernel/config.
     freq_info = psutil.cpu_freq(percpu=True)
     if freq_info:
         freq_per_core_mhz = [round(f.current, 1) if f else None for f in freq_info]
@@ -99,13 +89,9 @@ def collect_metrics(
         freq_per_core_mhz = None
         freq_avg_mhz = round(f.current, 1) if f and f.current is not None else None
 
-    # Memory
     vm = psutil.virtual_memory()
-
-    # SoC temperature
     soc_temp_c = read_soc_temp_c()
 
-    # Network throughput (total); clamp to 0 to handle counter resets / rollovers.
     raw_net = psutil.net_io_counters(pernic=True) or {}
     net_now = get_net_totals(raw_net)
     rx_bps = max(0, (net_now["rx_bytes"] - last_net["rx_bytes"]) / dt)
@@ -122,7 +108,6 @@ def collect_metrics(
         "soc_temp_c": soc_temp_c if soc_temp_c is not None else "N/A",
         "net_rx_bps_total": int(rx_bps),
         "net_tx_bps_total": int(tx_bps),
-        # Backward-compatible aliases for legacy consumers
         "cpu": cpu_total,
         "mem": vm.percent,
         "temp": soc_temp_c if soc_temp_c is not None else "N/A",
@@ -131,42 +116,39 @@ def collect_metrics(
     return stats, now, net_now
 
 
-async def metric_stream(sample_period_s: float = 1.0, max_frames: Optional[int] = None):
-    """Async generator yielding SSE-formatted system metric frames.
+async def push_metrics_loop(
+    *,
+    node_id: Optional[str] = None,
+    sample_period_s: float = 1.0,
+    max_frames: Optional[int] = None,
+    client_factory=httpx.AsyncClient,
+) -> None:
+    """Push Pi metrics snapshots to the relay."""
+    node_id = node_id or detect_node_id()
+    path = f"ingest/pulse/{node_id}/stream"
 
-    Args:
-        sample_period_s: Seconds between frames (default 1.0).
-        max_frames: Terminate after this many frames. ``None`` (default) runs
-                    forever (production). Pass ``1`` in tests to get a single
-                    frame and have the generator exit naturally — no patching or
-                    cancellation required.
-    """
-    # Prime psutil's non-blocking CPU% counters.
     psutil.cpu_percent(interval=None)
     psutil.cpu_percent(interval=None, percpu=True)
 
     last_ts = time.monotonic()
-    raw_net = psutil.net_io_counters(pernic=True) or {}
-    last_net = get_net_totals(raw_net)
+    last_net = get_net_totals(psutil.net_io_counters(pernic=True) or {})
 
     frame = 0
-    try:
+    async with client_factory(timeout=relay_timeout()) as client:
         while max_frames is None or frame < max_frames:
-            stats, last_ts, last_net = collect_metrics(last_ts, last_net)
-            yield encode_sse(stats)
+            payload, last_ts, last_net = collect_metrics(last_ts, last_net)
+            try:
+                await post_payload(client, path, payload)
+            except Exception as exc:
+                log_post_failure("pulse", exc)
             frame += 1
-            # Skip the sleep after the final frame so the generator exits cleanly.
             if max_frames is None or frame < max_frames:
                 await asyncio.sleep(sample_period_s)
-    except asyncio.CancelledError:
-        return
 
 
-@app.get("/health")
-async def health():
-    return {"status": "pulsing"}
+async def main() -> None:
+    await push_metrics_loop()
 
 
-@app.get("/stream")
-async def stream():
-    return sse_response(metric_stream())
+if __name__ == "__main__":
+    asyncio.run(main())

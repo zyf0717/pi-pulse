@@ -2,10 +2,11 @@
 
 Real-time monitoring for Raspberry Pi nodes, SEN66 environmental sensors, and Polar H10 straps.
 
-The repo has two main runtime parts:
+The repo has three main runtime parts:
 
 - `app/`: the Shiny for Python dashboard
-- `rpi4/`: Raspberry Pi sensor services that publish SSE streams
+- `relay/`: the local push-to-pull relay on the dashboard host
+- `rpi4/`: Raspberry Pi sensor workers that push sensor payloads to the relay
 
 ## Components
 
@@ -13,26 +14,25 @@ The repo has two main runtime parts:
 - SEN66 dashboard for temperature, humidity, CO2, VOC, NOx, PM mass, and PM number concentration
 - H10 dashboard for heart rate, RR intervals, ECG, and acceleration
 - Multi-H10 support per Pi node
-- SSE-based ingestion throughout
+- relay-backed SSE ingestion throughout
 
 ## Architecture
 
 Pi-Pulse is split by responsibility:
 
-- `rpi4/` acquires sensor data and exposes it over FastAPI SSE endpoints
-- `app/` consumes those SSE streams, holds short in-memory histories, and renders the dashboard
+- `rpi4/` acquires sensor data and pushes JSON payloads upstream to the relay
+- `relay/` accepts Pi pushes and exposes app-compatible SSE pull endpoints
+- `app/` consumes those SSE streams from the relay, holds short in-memory histories, and renders the dashboard
 
 High-level flow:
 
-1. Each Raspberry Pi node runs one or more services from `rpi4/`.
-2. Those services publish JSON over SSE:
-   - pulse on `8001`
-   - SEN66 on `8002`
-   - H10 on `8003`
-3. The dashboard loads [app/config.yaml](app/config.yaml) and opens one SSE consumer per configured upstream stream.
-4. The app normalizes incoming data into bounded reactive state and short FIFO histories.
-5. The UI renders cards and charts from that state.
-6. ECG is the special case: the app forwards raw ECG chunks to the browser, and the browser draws the sweep client-side with Plotly.
+1. Each Raspberry Pi node runs one or more workers from `rpi4/`.
+2. Those workers push JSON payloads to the relay host on `:8010`.
+3. The relay exposes app-compatible GET SSE endpoints on `127.0.0.1:8010`.
+4. The dashboard loads [app/config.yaml](app/config.yaml) and opens one SSE consumer per configured relay stream.
+5. The app normalizes incoming data into bounded reactive state and short FIFO histories.
+6. The UI renders cards and charts from that state.
+7. ECG is the special case: the app forwards raw ECG chunks to the browser, and the browser draws the sweep client-side with Plotly.
 
 ## Repo Layout
 
@@ -50,6 +50,11 @@ High-level flow:
 │   ├── streams/
 │   ├── www/
 │   └── tests/
+├── relay/
+│   ├── server.py
+│   ├── config.py
+│   ├── config.yaml
+│   └── tests/
 ├── rpi4/
 │   ├── README.md
 │   ├── h10.py
@@ -66,7 +71,7 @@ High-level flow:
 ## Documentation
 
 - [app/README.md](app/README.md): dashboard config, runtime, and tests
-- [rpi4/README.md](rpi4/README.md): Raspberry Pi setup, permissions, H10 config, and systemd install
+- [rpi4/README.md](rpi4/README.md): Raspberry Pi setup, permissions, relay push config, H10 config, and systemd install
 
 ## Install
 
@@ -85,19 +90,19 @@ Current shape:
 devices:
   "10":
     pulse:
-      stream: http://192.168.121.10:8001/stream
+      stream: http://127.0.0.1:8010/pulse/10/stream
 
   "11":
     pulse:
-      stream: http://192.168.121.11:8001/stream
+      stream: http://127.0.0.1:8010/pulse/11/stream
     sen66:
-      stream: http://192.168.121.11:8002/stream
-      nc-stream: http://192.168.121.11:8002/nc-stream
+      stream: http://127.0.0.1:8010/sen66/11/stream
+      nc-stream: http://127.0.0.1:8010/sen66/11/nc-stream
     h10:
       "6FFF5628":
-        stream: http://192.168.121.11:8003/h10/6FFF5628/stream
-        ecg-stream: http://192.168.121.11:8003/h10/6FFF5628/ecg-stream
-        acc-stream: http://192.168.121.11:8003/h10/6FFF5628/acc-stream
+        stream: http://127.0.0.1:8010/h10/6FFF5628/stream
+        ecg-stream: http://127.0.0.1:8010/h10/6FFF5628/ecg-stream
+        acc-stream: http://127.0.0.1:8010/h10/6FFF5628/acc-stream
 ```
 
 Rules:
@@ -124,43 +129,29 @@ On the app side:
 
 On the Pi side:
 
-- [rpi4/pulse.py](rpi4/pulse.py) exposes system metrics
-- [rpi4/sen66.py](rpi4/sen66.py) exposes environmental metrics
-- [rpi4/h10.py](rpi4/h10.py) exposes multi-H10 HR, ECG, and ACC endpoints
+- [rpi4/pulse.py](rpi4/pulse.py) pushes system metrics
+- [rpi4/sen66.py](rpi4/sen66.py) pushes environmental metrics
+- [rpi4/h10.py](rpi4/h10.py) pushes multi-H10 HR, ECG, and ACC payloads
 
-All Pi-side services publish JSON over Server-Sent Events. The expected payload shapes are documented in [app/README.md](app/README.md).
+The relay converts those pushes back into GET SSE endpoints. Expected payload shapes are documented in [app/README.md](app/README.md).
 
 ## Run
 
 Dashboard:
 
 ```bash
+python -m relay.server
 python -m app.pi_pulse
 ```
 
-This starts the Shiny app on `127.0.0.1:8009`.
+This starts the relay on `127.0.0.1:8010` and the Shiny app on `127.0.0.1:8009`.
 
 Pi-side services are documented in [rpi4/README.md](rpi4/README.md).
 
 ## Tests
 
-Run the app test suite:
+Run the full repo test suite:
 
 ```bash
-pytest app/tests
-```
-
-Current app coverage includes:
-
-- config loading and shaping
-- layout structure
-- render logic
-- SSE consumer/parser behavior
-- ECG sweep message contract
-- static asset presence/behavior checks
-
-Pi-side tests are in `rpi4/tests` and can be run with:
-
-```bash
-pytest rpi4/tests
+pytest
 ```

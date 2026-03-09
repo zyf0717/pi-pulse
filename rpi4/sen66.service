@@ -1,12 +1,12 @@
 [Unit]
-Description=Sen66 — Air Quality API (PM / CO2 / VOC / NOx / RH / T)
+Description=Sen66 — Air Quality Relay Worker (PM / CO2 / VOC / NOx / RH / T)
 After=network.target
 
 [Service]
 Type=simple
 User=${SERVICE_USER}
 WorkingDirectory=${WORKING_DIR}
-ExecStart=${UVICORN_BIN} sen66:app --host 0.0.0.0 --port 8002 --timeout-graceful-shutdown 5
+ExecStart=${PYTHON_BIN} ${WORKING_DIR}/sen66.py
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=10

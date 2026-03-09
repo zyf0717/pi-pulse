@@ -5,7 +5,7 @@
 It is responsible for:
 
 - loading the node-centric config from [config.yaml](config.yaml)
-- opening SSE connections to Pi-side services
+- opening SSE connections to the local relay
 - maintaining short reactive histories for cards and charts
 - rendering the UI, including the client-driven ECG sweep
 
@@ -29,19 +29,19 @@ Each top-level key in [config.yaml](config.yaml) is one Pi node:
 devices:
   "10":
     pulse:
-      stream: http://192.168.121.10:8001/stream
+      stream: http://127.0.0.1:8010/pulse/10/stream
 
   "11":
     pulse:
-      stream: http://192.168.121.11:8001/stream
+      stream: http://127.0.0.1:8010/pulse/11/stream
     sen66:
-      stream: http://192.168.121.11:8002/stream
-      nc-stream: http://192.168.121.11:8002/nc-stream
+      stream: http://127.0.0.1:8010/sen66/11/stream
+      nc-stream: http://127.0.0.1:8010/sen66/11/nc-stream
     h10:
       "6FFF5628":
-        stream: http://192.168.121.11:8003/h10/6FFF5628/stream
-        ecg-stream: http://192.168.121.11:8003/h10/6FFF5628/ecg-stream
-        acc-stream: http://192.168.121.11:8003/h10/6FFF5628/acc-stream
+        stream: http://127.0.0.1:8010/h10/6FFF5628/stream
+        ecg-stream: http://127.0.0.1:8010/h10/6FFF5628/ecg-stream
+        acc-stream: http://127.0.0.1:8010/h10/6FFF5628/acc-stream
 ```
 
 Rules:
@@ -68,7 +68,7 @@ The app binds to `127.0.0.1:8009`.
 Runtime flow:
 
 1. [config.py](config.py) loads [config.yaml](config.yaml) and builds `DEVICES`, `SEN66_DEVICES`, `H10_DEVICES`, and selector metadata.
-2. [ingest.py](ingest.py) owns one process-global ingest set and starts one SSE consumer per configured upstream stream using [streams/consumer.py](streams/consumer.py).
+2. [ingest.py](ingest.py) owns one process-global ingest set and starts one SSE consumer per configured relay stream using [streams/consumer.py](streams/consumer.py).
 3. Incoming payloads are normalized and written into small bounded `deque` histories plus `reactive.Value` state shared by all browser sessions in that app process.
 4. [server.py](server.py) does not open per-session upstream streams; it only binds the active Shiny session to the shared ingest state and registers renders.
 5. Render modules under `renders/` read from that shared state and update cards, charts, and motion views.
@@ -84,7 +84,7 @@ The current app structure reflects a few deliberate architecture changes:
   `config.yaml` is organized by Pi node, not by sensor type. One node can have one `pulse`, one `sen66`, and multiple `h10` streams.
 
 - Process-global ingest:
-  upstream SSE connections are shared per app process. Opening additional browser sessions no longer creates additional upstream streams.
+  relay SSE connections are shared per app process. Opening additional browser sessions no longer creates additional upstream streams.
 
 - Client-driven ECG:
   ECG is no longer rendered as repeated Python-side Plotly array replacement. The browser owns the sweep buffer and pacing, and the server only forwards raw ECG chunks.
@@ -150,8 +150,8 @@ H10 HR stream:
 
 ```json
 {
-  "heart_rate_bpm": 72,
-  "rr_intervals_ms": [824, 840]
+  "bpm": 72,
+  "rr_ms": [824, 840]
 }
 ```
 

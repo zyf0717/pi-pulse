@@ -7,11 +7,11 @@ def test_devices_match_checked_in_config() -> None:
     assert config.DEVICES == {
         "10": {
             "label": "10 (192.168.121.10)",
-            "url": "http://192.168.121.10:8001/stream",
+            "url": "http://127.0.0.1:8010/pulse/10/stream",
         },
         "11": {
             "label": "11 (192.168.121.11)",
-            "url": "http://192.168.121.11:8001/stream",
+            "url": "http://127.0.0.1:8010/pulse/11/stream",
         },
     }
 
@@ -20,8 +20,8 @@ def test_sen66_devices_match_checked_in_config() -> None:
     assert config.SEN66_DEVICES == {
         "11": {
             "label": "11 (192.168.121.11)",
-            "stream": "http://192.168.121.11:8002/stream",
-            "nc_stream": "http://192.168.121.11:8002/nc-stream",
+            "stream": "http://127.0.0.1:8010/sen66/11/stream",
+            "nc_stream": "http://127.0.0.1:8010/sen66/11/nc-stream",
         }
     }
 
@@ -32,9 +32,9 @@ def test_h10_devices_match_checked_in_config() -> None:
             "label": "6FFF5628",
             "device": "11",
             "h10_id": "6FFF5628",
-            "stream": "http://192.168.121.11:8003/h10/6FFF5628/stream",
-            "ecg_stream": "http://192.168.121.11:8003/h10/6FFF5628/ecg-stream",
-            "acc_stream": "http://192.168.121.11:8003/h10/6FFF5628/acc-stream",
+            "stream": "http://127.0.0.1:8010/h10/6FFF5628/stream",
+            "ecg_stream": "http://127.0.0.1:8010/h10/6FFF5628/ecg-stream",
+            "acc_stream": "http://127.0.0.1:8010/h10/6FFF5628/acc-stream",
         }
     }
     assert config.H10_DEVICE_OPTIONS == {"11": {"11:6FFF5628": "6FFF5628"}}

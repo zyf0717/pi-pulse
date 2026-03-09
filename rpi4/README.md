@@ -1,14 +1,14 @@
 # Raspberry Pi Services
 
-`rpi4/` contains the Pi-side FastAPI services that publish Server-Sent Events for the dashboard.
+`rpi4/` contains the Pi-side workers that read local sensors and push payloads to the relay on the dashboard host.
 
-Services:
+Workers:
 
-- `pulse.py`: Pi health metrics on port `8001`
-- `sen66.py`: SEN66 environmental data on port `8002`
-- `h10.py`: Polar H10 BLE data on port `8003`
+- `pulse.py`: Pi health metrics worker
+- `sen66.py`: SEN66 environmental data worker
+- `h10.py`: Polar H10 BLE worker
 
-The dashboard consumes these endpoints through [app/config.yaml](../app/config.yaml).
+The app then consumes relay endpoints through [app/config.yaml](../app/config.yaml).
 
 ## Prerequisites
 
@@ -45,16 +45,24 @@ H10_ADDRESS: dict[str, str] = {
 
 Rules:
 
-- key: stable `device_id` used in the HTTP routes
+- key: stable `device_id` used in the relay routes
 - value: BLE MAC address for that strap
-- one Pi can expose multiple H10 straps
+- one Pi can push multiple H10 straps
 
-Endpoints per configured H10:
+## Configure Relay Push Target
 
-- `/h10/{device_id}/health`
-- `/h10/{device_id}/stream`
-- `/h10/{device_id}/ecg-stream`
-- `/h10/{device_id}/acc-stream`
+Workers push to the relay host with:
+
+- `PI_PULSE_RELAY_URL`
+- optional `PI_PULSE_NODE_ID`
+
+Defaults:
+
+```bash
+PI_PULSE_RELAY_URL=http://192.168.121.1:8010
+```
+
+`pulse.py` and `sen66.py` derive the node id from the local Ethernet IP used to reach the relay. Set `PI_PULSE_NODE_ID` explicitly if that heuristic is not appropriate.
 
 ## Run Locally
 
@@ -63,33 +71,27 @@ From `rpi4/`:
 ```bash
 conda activate pi-pulse
 cd rpi4
-uvicorn pulse:app --host 0.0.0.0 --port 8001
-uvicorn sen66:app --host 0.0.0.0 --port 8002
-uvicorn h10:app --host 0.0.0.0 --port 8003
+python pulse.py
+python sen66.py
+python h10.py
 ```
 
-Useful endpoints:
+These workers do not expose HTTP routes themselves. They push into the relay:
 
-- pulse:
-  - `GET /health`
-  - `GET /stream`
-- sen66:
-  - `GET /health`
-  - `GET /stream`
-  - `GET /nc-stream`
-- h10:
-  - `GET /h10/{device_id}/health`
-  - `GET /h10/{device_id}/stream`
-  - `GET /h10/{device_id}/ecg-stream`
-  - `GET /h10/{device_id}/acc-stream`
+- `POST /ingest/pulse/{node_id}/stream`
+- `POST /ingest/sen66/{node_id}/stream`
+- `POST /ingest/sen66/{node_id}/nc-stream`
+- `POST /ingest/h10/{device_id}/stream`
+- `POST /ingest/h10/{device_id}/ecg-stream`
+- `POST /ingest/h10/{device_id}/acc-stream`
 
 ## Expected Output
 
-Each streaming endpoint emits JSON over Server-Sent Events.
+Each worker pushes the following JSON payloads to the relay.
 
 Examples:
 
-`GET /stream` from `pulse.py`:
+`pulse.py`:
 
 ```json
 {
@@ -102,7 +104,7 @@ Examples:
 }
 ```
 
-`GET /stream` from `sen66.py`:
+`sen66.py` main payload:
 
 ```json
 {
@@ -118,7 +120,7 @@ Examples:
 }
 ```
 
-`GET /nc-stream` from `sen66.py`:
+`sen66.py` number-concentration payload:
 
 ```json
 {
@@ -130,16 +132,16 @@ Examples:
 }
 ```
 
-`GET /h10/{device_id}/stream` from `h10.py`:
+`h10.py` HR payload:
 
 ```json
 {
-  "heart_rate_bpm": 72,
-  "rr_intervals_ms": [824, 840]
+  "bpm": 72,
+  "rr_ms": [824, 840]
 }
 ```
 
-`GET /h10/{device_id}/ecg-stream` from `h10.py`:
+`h10.py` ECG payload:
 
 ```json
 {
@@ -148,7 +150,7 @@ Examples:
 }
 ```
 
-`GET /h10/{device_id}/acc-stream` from `h10.py`:
+`h10.py` ACC payload:
 
 ```json
 {
@@ -187,9 +189,9 @@ sudo -E ./rpi4/services.sh remove h10
 
 - `SERVICE_USER`
 - `WORKING_DIR`
-- `UVICORN_BIN`
+- `PYTHON_BIN`
 
-Use `sudo -E` so the active `CONDA_PREFIX` is preserved and the correct `uvicorn` is installed into the unit.
+Use `sudo -E` so the active `CONDA_PREFIX` is preserved and the correct `python` is installed into the unit.
 
 ## Dashboard Wiring
 
@@ -199,15 +201,15 @@ The dashboard is node-centric. Each top-level key in [app/config.yaml](../app/co
 devices:
   "11":
     pulse:
-      stream: http://192.168.121.11:8001/stream
+      stream: http://127.0.0.1:8010/pulse/11/stream
     sen66:
-      stream: http://192.168.121.11:8002/stream
-      nc-stream: http://192.168.121.11:8002/nc-stream
+      stream: http://127.0.0.1:8010/sen66/11/stream
+      nc-stream: http://127.0.0.1:8010/sen66/11/nc-stream
     h10:
       "6FFF5628":
-        stream: http://192.168.121.11:8003/h10/6FFF5628/stream
-        ecg-stream: http://192.168.121.11:8003/h10/6FFF5628/ecg-stream
-        acc-stream: http://192.168.121.11:8003/h10/6FFF5628/acc-stream
+        stream: http://127.0.0.1:8010/h10/6FFF5628/stream
+        ecg-stream: http://127.0.0.1:8010/h10/6FFF5628/ecg-stream
+        acc-stream: http://127.0.0.1:8010/h10/6FFF5628/acc-stream
 ```
 
 One node can have:

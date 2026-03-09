@@ -7,7 +7,7 @@
 #   sudo -E ./rpi4/services.sh <command> [service ...]
 #
 #   sudo -E is required for write commands (install, remove, start, stop,
-#   restart, reload) so that $CONDA_PREFIX is preserved for uvicorn detection.
+#   restart, reload) so that $CONDA_PREFIX is preserved for python detection.
 #   'status' does not need sudo.
 #
 # Commands:
@@ -30,7 +30,7 @@
 # Placeholder substitution (performed at install time):
 #   ${SERVICE_USER}  — user who owns the repo ($SUDO_USER, or current user)
 #   ${WORKING_DIR}   — rpi4/ directory (where the .py files live)
-#   ${UVICORN_BIN}   — uvicorn found via $CONDA_PREFIX, venv/, .venv/, or PATH
+#   ${PYTHON_BIN}    — python found via $CONDA_PREFIX, venv/, .venv/, or PATH
 
 set -euo pipefail
 
@@ -54,27 +54,29 @@ resolve_context() {
     # WORKING_DIR: the rpi4/ directory next to this script (where *.py live)
     WORKING_DIR="$SCRIPT_DIR"
 
-    # UVICORN_BIN: search in order —
+    # PYTHON_BIN: search in order —
     #   1. active conda env  2. venv next to repo root  3. PATH
     local repo_root; repo_root="$(dirname "$SCRIPT_DIR")"
-    local conda_uvicorn="${CONDA_PREFIX:-}/bin/uvicorn"
-    local venv_uvicorn="$repo_root/venv/bin/uvicorn"
-    local dotvenv_uvicorn="$repo_root/.venv/bin/uvicorn"
+    local conda_python="${CONDA_PREFIX:-}/bin/python"
+    local venv_python="$repo_root/venv/bin/python"
+    local dotvenv_python="$repo_root/.venv/bin/python"
 
-    if [[ -x "$conda_uvicorn" ]]; then
-        UVICORN_BIN="$conda_uvicorn"
-    elif [[ -x "$venv_uvicorn" ]]; then
-        UVICORN_BIN="$venv_uvicorn"
-    elif [[ -x "$dotvenv_uvicorn" ]]; then
-        UVICORN_BIN="$dotvenv_uvicorn"
-    elif command -v uvicorn &>/dev/null; then
-        UVICORN_BIN="$(command -v uvicorn)"
+    if [[ -x "$conda_python" ]]; then
+        PYTHON_BIN="$conda_python"
+    elif [[ -x "$venv_python" ]]; then
+        PYTHON_BIN="$venv_python"
+    elif [[ -x "$dotvenv_python" ]]; then
+        PYTHON_BIN="$dotvenv_python"
+    elif command -v python3 &>/dev/null; then
+        PYTHON_BIN="$(command -v python3)"
+    elif command -v python &>/dev/null; then
+        PYTHON_BIN="$(command -v python)"
     else
-        die "uvicorn not found — activate the project environment first, then use 'sudo -E' to preserve it:
+        die "python not found — activate the project environment first, then use 'sudo -E' to preserve it:
        conda activate pi-pulse && sudo -E ./rpi4/services.sh install"
     fi
 
-    export SERVICE_USER WORKING_DIR UVICORN_BIN
+    export SERVICE_USER WORKING_DIR PYTHON_BIN
 }
 
 # Resolve service files from names or discover all in SCRIPT_DIR.
@@ -111,7 +113,7 @@ cmd_install() {
     info "Installing with:"
     info "  SERVICE_USER = $SERVICE_USER"
     info "  WORKING_DIR  = $WORKING_DIR"
-    info "  UVICORN_BIN  = $UVICORN_BIN"
+    info "  PYTHON_BIN   = $PYTHON_BIN"
 
     local -a files
     mapfile -t files < <(resolve_services "$@")
@@ -120,7 +122,7 @@ cmd_install() {
         local unit; unit=$(unit_name "$f")
         local dest="$SYSTEMD_DIR/$unit"
         info "Installing $unit → $dest"
-        envsubst '${SERVICE_USER} ${WORKING_DIR} ${UVICORN_BIN}' < "$f" > "$dest"
+        envsubst '${SERVICE_USER} ${WORKING_DIR} ${PYTHON_BIN}' < "$f" > "$dest"
     done
 
     info "Running daemon-reload"

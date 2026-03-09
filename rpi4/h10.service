@@ -1,12 +1,12 @@
 [Unit]
-Description=H10 — Polar H10 Heart-Rate BLE API (bpm / RR intervals)
+Description=H10 — Polar H10 Heart-Rate BLE Relay Worker (bpm / RR intervals)
 After=network.target bluetooth.target
 
 [Service]
 Type=simple
 User=${SERVICE_USER}
 WorkingDirectory=${WORKING_DIR}
-ExecStart=${UVICORN_BIN} h10:app --host 0.0.0.0 --port 8003 --timeout-graceful-shutdown 5
+ExecStart=${PYTHON_BIN} ${WORKING_DIR}/h10.py
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=10
