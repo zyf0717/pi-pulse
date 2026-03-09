@@ -79,12 +79,12 @@ async def post_payload(
 
     now = time.monotonic()
     if now < _next_attempt_monotonic:
-        remaining = _next_attempt_monotonic - now
-        raise RelayBackoffActive(
-            f"relay in backoff for {remaining:.1f}s; discarding stale payload"
-        )
+        # Backoff is active; silently drop this payload to avoid spamming
+        # callers' error logs with expected backoff behavior.
+        return
 
     try:
+        response = await client.post(ingest_url(path, relay_base_url), json=payload)
         response = await client.post(ingest_url(path, relay_base_url), json=payload)
         response.raise_for_status()
     except Exception:
