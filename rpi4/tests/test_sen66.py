@@ -136,7 +136,7 @@ def test_push_environmental_loop_posts_to_relay():
     assert len(instances) == 1
     assert instances[0].posts == [
         (
-            "http://192.168.121.1:8010/ingest/sen66/11/stream",
+            "http://192.168.121.1:8010/ingest/11/sen66/main/default",
             sen66.read_environmental(sensor),
         )
     ]
@@ -162,7 +162,7 @@ def test_push_number_concentration_loop_posts_to_relay():
     assert len(instances) == 1
     assert instances[0].posts == [
         (
-            "http://192.168.121.1:8010/ingest/sen66/11/nc-stream",
+            "http://192.168.121.1:8010/ingest/11/sen66/main/number_concentration",
             sen66.read_number_concentration(sensor),
         )
     ]

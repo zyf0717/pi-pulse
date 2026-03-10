@@ -1,9 +1,16 @@
 from collections.abc import Mapping
 from pathlib import Path
+import sys
 
 import yaml
 
+if __package__ in (None, ""):
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from shared.streams import DEFAULT_STREAM, stream_path
+
 _CONFIG_PATH = Path(__file__).parent / "config.yaml"
+_DEFAULT_RELAY_BASE_URL = "http://127.0.0.1:8010"
 _IP_PREFIX = "192.168.121."
 
 
@@ -12,74 +19,98 @@ def load_raw_config(config_path: Path = _CONFIG_PATH) -> dict:
         return yaml.safe_load(config_file) or {}
 
 
-def _device_label(key: str) -> str:
-    return f"{key} ({_IP_PREFIX}{key})"
+def _device_label(device_id: str) -> str:
+    return f"{device_id} ({_IP_PREFIX}{device_id})"
 
 
-def _node_label(key: str, value: Mapping) -> str:
+def _node_label(device_id: str, value: Mapping) -> str:
     label = value.get("label")
     if label:
         return str(label)
-    if key.isdigit():
-        return _device_label(key)
-    return key
+    if device_id.isdigit():
+        return _device_label(device_id)
+    return device_id
 
 
-def _h10_stream_key(node_key: str, h10_key: str) -> str:
-    return f"{node_key}:{h10_key}"
+def _relay_url(base_url: str, path: str) -> str:
+    return f"{base_url.rstrip('/')}{path}"
 
 
 def build_settings(raw_config: Mapping) -> dict:
+    relay_base_url = str(
+        raw_config.get("relay_base_url") or _DEFAULT_RELAY_BASE_URL
+    ).rstrip("/")
     device_config = raw_config.get("devices", {})
 
     all_devices: dict[str, str] = {}
-    pulse_devices: dict[str, dict] = {}
+    devices: dict[str, dict] = {}
     sen66_devices: dict[str, dict] = {}
     h10_devices: dict[str, dict] = {}
     h10_device_options: dict[str, dict[str, str]] = {}
-    h10_defaults: dict[str, str | None] = {}
+    h10_defaults: dict[str, str] = {}
 
-    for node_key, node_value in device_config.items():
-        node_label = _node_label(node_key, node_value)
-        all_devices[node_key] = node_label
+    for device_id, value in device_config.items():
+        if not isinstance(value, Mapping):
+            continue
+        label = _node_label(device_id, value)
+        all_devices[device_id] = label
 
-        pulse_value = node_value.get("pulse")
-        if isinstance(pulse_value, Mapping):
-            pulse_devices[node_key] = {"label": node_label, "url": pulse_value["stream"]}
-
-        sen66_value = node_value.get("sen66")
-        if isinstance(sen66_value, Mapping):
-            sen66_devices[node_key] = {
-                "label": node_label,
-                "stream": sen66_value["stream"],
-                "nc_stream": sen66_value["nc-stream"],
-            }
-
-        h10_options: dict[str, str] = {}
-        h10_streams = node_value.get("h10", {})
-        if not isinstance(h10_streams, Mapping):
-            h10_streams = {}
-        for h10_key, h10_value in h10_streams.items():
-            if not isinstance(h10_value, Mapping):
-                continue
-            stream_key = _h10_stream_key(node_key, h10_key)
-            label = str(h10_value.get("label") or h10_key)
-            h10_devices[stream_key] = {
+        if "pulse" in value:
+            devices[device_id] = {
                 "label": label,
-                "device": node_key,
-                "h10_id": h10_key,
-                "stream": h10_value["stream"],
-                "ecg_stream": h10_value.get("ecg-stream"),
-                "acc_stream": h10_value.get("acc-stream"),
+                DEFAULT_STREAM: _relay_url(
+                    relay_base_url,
+                    stream_path("pulse", device_id),
+                ),
             }
-            h10_options[stream_key] = label
-        if h10_options:
-            h10_device_options[node_key] = h10_options
-            h10_defaults[node_key] = next(iter(h10_options))
+
+        if "sen66" in value:
+            sen66_devices[device_id] = {
+                "label": label,
+                DEFAULT_STREAM: _relay_url(
+                    relay_base_url,
+                    stream_path("sen66", device_id),
+                ),
+                "number_concentration": _relay_url(
+                    relay_base_url,
+                    stream_path("sen66", device_id, "number_concentration"),
+                ),
+            }
+
+        h10_config = value.get("h10", {})
+        if not isinstance(h10_config, Mapping):
+            continue
+        options: dict[str, str] = {}
+        for instance_id, instance_value in h10_config.items():
+            instance_label = instance_id
+            if isinstance(instance_value, Mapping) and instance_value.get("label"):
+                instance_label = str(instance_value["label"])
+            key = f"{device_id}:{instance_id}"
+            h10_devices[key] = {
+                "label": instance_label,
+                "device": device_id,
+                "h10_id": instance_id,
+                DEFAULT_STREAM: _relay_url(
+                    relay_base_url,
+                    stream_path("h10", device_id, instance_id=instance_id),
+                ),
+                "ecg": _relay_url(
+                    relay_base_url,
+                    stream_path("h10", device_id, "ecg", instance_id=instance_id),
+                ),
+                "acc": _relay_url(
+                    relay_base_url,
+                    stream_path("h10", device_id, "acc", instance_id=instance_id),
+                ),
+            }
+            options[key] = instance_label
+        if options:
+            h10_device_options[device_id] = options
+            h10_defaults[device_id] = next(iter(options))
 
     all_devices_default = "11" if "11" in all_devices else next(iter(all_devices), None)
     return {
-        "devices": pulse_devices,
+        "devices": devices,
         "sen66_devices": sen66_devices,
         "h10_devices": h10_devices,
         "h10_device_options": h10_device_options,

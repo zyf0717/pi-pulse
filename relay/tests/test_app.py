@@ -3,6 +3,10 @@ import asyncio
 import json
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+
+from shared.streams import stream_key
+
 
 RELAY_DIR = Path(__file__).resolve().parents[1]
 
@@ -17,9 +21,9 @@ def _load_relay_app():
     return mod
 
 
-async def _collect_frames(relay, stream_key: str, n: int):
+async def _collect_frames(relay, key: str, n: int):
     frames = []
-    async for frame in relay._relay_stream(stream_key, max_frames=n):
+    async for frame in relay._relay_stream(key, max_frames=n):
         frames.append(frame)
     return frames
 
@@ -33,31 +37,57 @@ def test_health_reports_empty_registry_initially():
 
 def test_post_then_get_replays_latest_pulse_payload():
     relay = _load_relay_app()
+    client = TestClient(relay.app)
     payload = {"cpu": 45.2, "mem": 62.1}
-    post_response = asyncio.run(relay.ingest_pulse("10", payload))
+    post_response = client.post("/ingest/10/pulse/main/default", json=payload)
 
-    assert post_response == {"ok": True}
+    assert post_response.status_code == 200
+    assert post_response.json() == {"ok": True}
 
-    frames = asyncio.run(_collect_frames(relay, "pulse/10/stream", 1))
+    frames = asyncio.run(_collect_frames(relay, stream_key("pulse", "10"), 1))
 
     assert frames == [f"data: {json.dumps(payload)}\n\n"]
 
 
 def test_h10_ecg_route_keeps_payload_shape_and_path_identity():
     relay = _load_relay_app()
+    client = TestClient(relay.app)
     payload = {"samples_uv": [10, 12, 8, -4], "sample_rate_hz": 130}
-    asyncio.run(relay.ingest_h10_ecg("6FFF5628", payload))
+    response = client.post("/ingest/11/h10/6FFF5628/ecg", json=payload)
 
-    frames = asyncio.run(_collect_frames(relay, "h10/6FFF5628/ecg-stream", 1))
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+
+    frames = asyncio.run(
+        _collect_frames(relay, stream_key("h10", "11", "ecg", instance_id="6FFF5628"), 1)
+    )
 
     assert frames == [f"data: {json.dumps(payload)}\n\n"]
 
 
 def test_latest_payload_is_updated_on_second_post():
     relay = _load_relay_app()
-    asyncio.run(relay.ingest_sen66("11", {"temperature_c": 22.5}))
-    asyncio.run(relay.ingest_sen66("11", {"temperature_c": 23.0}))
+    client = TestClient(relay.app)
+    client.post("/ingest/11/sen66/main/default", json={"temperature_c": 22.5})
+    client.post("/ingest/11/sen66/main/default", json={"temperature_c": 23.0})
 
-    frames = asyncio.run(_collect_frames(relay, "sen66/11/stream", 1))
+    frames = asyncio.run(_collect_frames(relay, stream_key("sen66", "11"), 1))
 
     assert frames == ['data: {"temperature_c": 23.0}\n\n']
+
+
+def test_invalid_route_combinations_return_not_found():
+    relay = _load_relay_app()
+    client = TestClient(relay.app)
+
+    assert client.post("/ingest/11/pulse/not-main/default", json={}).status_code == 404
+    assert client.post("/ingest/11/h10/main/ecg", json={}).status_code == 404
+    assert client.get("/11/sen66/main/not_a_stream").status_code == 404
+
+
+def test_relay_exposes_generic_ingest_and_stream_routes():
+    relay = _load_relay_app()
+    route_paths = {route.path for route in relay.app.routes}
+
+    assert "/ingest/{device_id}/{system_key}/{instance_id}/{stream_name}" in route_paths
+    assert "/{device_id}/{system_key}/{instance_id}/{stream_name}" in route_paths

@@ -7,48 +7,39 @@ relay on the dashboard host instead of serving local SSE endpoints.
 
 import asyncio
 from collections.abc import Callable
+from pathlib import Path
+import sys
 
 import httpx
 from bleak import BleakClient
 
-try:
-    from h10_protocol import (
-        ACC_RANGE_G,
-        ACC_SAMPLE_RATE_HZ,
-        ACC_START_CMD,
-        ECG_SAMPLE_RATE_HZ,
-        ECG_START_CMD,
-        H10_ADDRESS,
-        HR_MEASUREMENT_UUID,
-        PMD_CP_UUID,
-        PMD_DATA_UUID,
-        PMD_MEAS_TYPE_ACC,
-        PMD_MEAS_TYPE_ECG,
-        ble_connect_loop,
-        parse_acc_frame,
-        parse_ecg_frame,
-        parse_hr_measurement,
-    )
-    from relay_push import log_post_failure, post_payload, relay_timeout
-except ImportError:
-    from rpi4.h10_protocol import (
-        ACC_RANGE_G,
-        ACC_SAMPLE_RATE_HZ,
-        ACC_START_CMD,
-        ECG_SAMPLE_RATE_HZ,
-        ECG_START_CMD,
-        H10_ADDRESS,
-        HR_MEASUREMENT_UUID,
-        PMD_CP_UUID,
-        PMD_DATA_UUID,
-        PMD_MEAS_TYPE_ACC,
-        PMD_MEAS_TYPE_ECG,
-        ble_connect_loop,
-        parse_acc_frame,
-        parse_ecg_frame,
-        parse_hr_measurement,
-    )
-    from rpi4.relay_push import log_post_failure, post_payload, relay_timeout
+if __package__ in (None, ""):
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from rpi4.h10_protocol import (
+    ACC_RANGE_G,
+    ACC_SAMPLE_RATE_HZ,
+    ACC_START_CMD,
+    ECG_SAMPLE_RATE_HZ,
+    ECG_START_CMD,
+    H10_ADDRESS,
+    HR_MEASUREMENT_UUID,
+    PMD_CP_UUID,
+    PMD_DATA_UUID,
+    PMD_MEAS_TYPE_ACC,
+    PMD_MEAS_TYPE_ECG,
+    ble_connect_loop,
+    parse_acc_frame,
+    parse_ecg_frame,
+    parse_hr_measurement,
+)
+from rpi4.relay_push import (
+    detect_node_id,
+    log_post_failure,
+    post_payload,
+    relay_timeout,
+)
+from shared.streams import DEFAULT_STREAM, ingest_path
 
 
 def _schedule_push(pending: set[asyncio.Task], coro) -> None:
@@ -62,7 +53,7 @@ def build_notification_handlers(
     publish: Callable[[str, dict], None],
 ):
     def handle_hr_notification(_: int, data: bytearray) -> None:
-        publish("stream", parse_hr_measurement(bytes(data)))
+        publish(DEFAULT_STREAM, parse_hr_measurement(bytes(data)))
 
     def handle_pmd_notification(_: int, data: bytearray) -> None:
         packet = bytes(data)
@@ -76,7 +67,7 @@ def build_notification_handlers(
             except ValueError:
                 return
             publish(
-                "ecg-stream",
+                "ecg",
                 {"samples_uv": samples, "sample_rate_hz": ECG_SAMPLE_RATE_HZ},
             )
             return
@@ -87,7 +78,7 @@ def build_notification_handlers(
             except ValueError:
                 return
             publish(
-                "acc-stream",
+                "acc",
                 {
                     "samples_mg": samples,
                     "sample_rate_hz": ACC_SAMPLE_RATE_HZ,
@@ -98,19 +89,24 @@ def build_notification_handlers(
     return handle_hr_notification, handle_pmd_notification
 
 
-async def ble_loop(device_id: str, address: str, stop_event: asyncio.Event) -> None:
+async def ble_loop(
+    node_id: str,
+    device_id: str,
+    address: str,
+    stop_event: asyncio.Event,
+) -> None:
     """Connect to one H10 and push HR/ECG/ACC payloads to the relay."""
     pending_pushes: set[asyncio.Task] = set()
 
     async with httpx.AsyncClient(timeout=relay_timeout()) as client:
-        def publish(stream_name: str, payload: dict) -> None:
-            path = f"ingest/h10/{device_id}/{stream_name}"
+        def publish(channel_key: str, payload: dict) -> None:
+            path = ingest_path("h10", node_id, channel_key, instance_id=device_id)
 
             async def _push() -> None:
                 try:
                     await post_payload(client, path, payload)
                 except Exception as exc:
-                    log_post_failure(f"h10-{device_id}-{stream_name}", exc)
+                    log_post_failure(f"h10-{device_id}-{channel_key}", exc)
 
             _schedule_push(pending_pushes, _push())
 
@@ -139,9 +135,10 @@ async def ble_loop(device_id: str, address: str, stop_event: asyncio.Event) -> N
 
 
 async def main() -> None:
+    node_id = detect_node_id()
     stop_event = asyncio.Event()
     tasks = [
-        asyncio.create_task(ble_loop(device_id, address, stop_event))
+        asyncio.create_task(ble_loop(node_id, device_id, address, stop_event))
         for device_id, address in H10_ADDRESS.items()
     ]
     try:

@@ -361,7 +361,7 @@ def _create_stream_tasks(state: IngestState) -> list:
             asyncio.create_task(
                 stream_consumer(
                     f"pulse-{key}",
-                    device["url"],
+                    device["default"],
                     lambda data, key=key: _on_pulse(state, key, data),
                 )
             )
@@ -371,7 +371,7 @@ def _create_stream_tasks(state: IngestState) -> list:
             asyncio.create_task(
                 stream_consumer(
                     f"sen66-{key}",
-                    device["stream"],
+                    device["default"],
                     lambda data, key=key: _on_sen66(state, key, data),
                 )
             )
@@ -381,7 +381,7 @@ def _create_stream_tasks(state: IngestState) -> list:
             asyncio.create_task(
                 stream_consumer(
                     f"sen66-nc-{key}",
-                    device["nc_stream"],
+                    device["number_concentration"],
                     lambda data, key=key: _on_sen66_nc(state, key, data),
                 )
             )
@@ -391,7 +391,7 @@ def _create_stream_tasks(state: IngestState) -> list:
             asyncio.create_task(
                 stream_consumer(
                     f"h10-{key}",
-                    device["stream"],
+                    device["default"],
                     lambda data, key=key: _on_h10(state, key, data),
                 )
             )
@@ -401,23 +401,23 @@ def _create_stream_tasks(state: IngestState) -> list:
             asyncio.create_task(
                 stream_consumer(
                     f"h10-ecg-{key}",
-                    device["ecg_stream"],
+                    device["ecg"],
                     lambda data, key=key: _on_h10_ecg(state, key, data),
                 )
             )
             for key, device in H10_DEVICES.items()
-            if device.get("ecg_stream")
+            if device.get("ecg")
         ]
         + [
             asyncio.create_task(
                 stream_consumer(
                     f"h10-acc-{key}",
-                    device["acc_stream"],
+                    device["acc"],
                     lambda data, key=key: _on_h10_acc(state, key, data),
                 )
             )
             for key, device in H10_DEVICES.items()
-            if device.get("acc_stream")
+            if device.get("acc")
         ]
     )
     for task in tasks:

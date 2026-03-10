@@ -7,11 +7,11 @@ def test_devices_match_checked_in_config() -> None:
     assert config.DEVICES == {
         "10": {
             "label": "10 (192.168.121.10)",
-            "url": "http://127.0.0.1:8010/pulse/10/stream",
+            "default": "http://127.0.0.1:8010/10/pulse/main/default",
         },
         "11": {
             "label": "11 (192.168.121.11)",
-            "url": "http://127.0.0.1:8010/pulse/11/stream",
+            "default": "http://127.0.0.1:8010/11/pulse/main/default",
         },
     }
 
@@ -20,8 +20,8 @@ def test_sen66_devices_match_checked_in_config() -> None:
     assert config.SEN66_DEVICES == {
         "11": {
             "label": "11 (192.168.121.11)",
-            "stream": "http://127.0.0.1:8010/sen66/11/stream",
-            "nc_stream": "http://127.0.0.1:8010/sen66/11/nc-stream",
+            "default": "http://127.0.0.1:8010/11/sen66/main/default",
+            "number_concentration": "http://127.0.0.1:8010/11/sen66/main/number_concentration",
         }
     }
 
@@ -32,16 +32,12 @@ def test_h10_devices_match_checked_in_config() -> None:
             "label": "EA78562C",
             "device": "11",
             "h10_id": "EA78562C",
-            "stream": "http://127.0.0.1:8010/h10/EA78562C/stream",
-            "ecg_stream": "http://127.0.0.1:8010/h10/EA78562C/ecg-stream",
-            "acc_stream": "http://127.0.0.1:8010/h10/EA78562C/acc-stream",
+            "default": "http://127.0.0.1:8010/11/h10/EA78562C/default",
+            "ecg": "http://127.0.0.1:8010/11/h10/EA78562C/ecg",
+            "acc": "http://127.0.0.1:8010/11/h10/EA78562C/acc",
         }
     }
-    assert config.H10_DEVICE_OPTIONS == {
-        "11": {
-            "11:EA78562C": "EA78562C",
-        }
-    }
+    assert config.H10_DEVICE_OPTIONS == {"11": {"11:EA78562C": "EA78562C"}}
     assert config.H10_DEFAULTS == {"11": "11:EA78562C"}
     assert config.H10_ACC_DYNAMIC_WINDOW_S == 0.5
 
@@ -66,39 +62,36 @@ def test_chart_option_mappings_are_stable() -> None:
 def test_load_raw_config_reads_explicit_path(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        'devices:\n  "12":\n    pulse:\n      stream: http://example/pulse\n    sen66:\n      stream: http://example/sen66\n      nc-stream: http://example/sen66/nc\n    h10:\n      "strap-a":\n        stream: http://example/h10/strap-a/stream\n        ecg-stream: http://example/h10/strap-a/ecg-stream\n        acc-stream: http://example/h10/strap-a/acc-stream\n',
+        'relay_base_url: http://example\n'
+        'devices:\n'
+        '  "12":\n'
+        '    pulse: {}\n'
+        '    sen66: {}\n'
+        '    h10:\n'
+        '      "strap-a": {}\n',
         encoding="utf-8",
     )
 
     loaded = config.load_raw_config(config_path)
 
-    assert loaded["devices"]["12"]["pulse"]["stream"] == "http://example/pulse"
-    assert loaded["devices"]["12"]["sen66"]["nc-stream"] == "http://example/sen66/nc"
-    assert loaded["devices"]["12"]["h10"]["strap-a"]["stream"] == "http://example/h10/strap-a/stream"
-    assert loaded["devices"]["12"]["h10"]["strap-a"]["ecg-stream"] == "http://example/h10/strap-a/ecg-stream"
-    assert loaded["devices"]["12"]["h10"]["strap-a"]["acc-stream"] == "http://example/h10/strap-a/acc-stream"
+    assert loaded["relay_base_url"] == "http://example"
+    assert loaded["devices"]["12"]["pulse"] == {}
+    assert loaded["devices"]["12"]["sen66"] == {}
+    assert loaded["devices"]["12"]["h10"]["strap-a"] == {}
 
 
-def test_build_settings_shapes_device_maps_and_nests_h10_by_node() -> None:
+def test_build_settings_derives_urls_from_structured_config() -> None:
     settings = config.build_settings(
         {
+            "relay_base_url": "http://example",
             "devices": {
                 "12": {
-                    "pulse": {"stream": "http://example/pulse"},
-                    "sen66": {
-                        "stream": "http://example/sen66",
-                        "nc-stream": "http://example/sen66/nc",
-                    },
+                    "label": "Lab Pi",
+                    "pulse": {},
+                    "sen66": {},
                     "h10": {
-                        "strap-a": {
-                            "label": "Test H10 A",
-                            "stream": "http://example/h10/strap-a/stream",
-                            "ecg-stream": "http://example/h10/strap-a/ecg-stream",
-                            "acc-stream": "http://example/h10/strap-a/acc-stream",
-                        },
-                        "strap-b": {
-                            "stream": "http://example/h10/strap-b/stream",
-                        },
+                        "strap-a": {"label": "Test H10 A"},
+                        "strap-b": {},
                     },
                 }
             },
@@ -106,13 +99,13 @@ def test_build_settings_shapes_device_maps_and_nests_h10_by_node() -> None:
     )
 
     assert settings["devices"] == {
-        "12": {"label": "12 (192.168.121.12)", "url": "http://example/pulse"}
+        "12": {"label": "Lab Pi", "default": "http://example/12/pulse/main/default"}
     }
     assert settings["sen66_devices"] == {
         "12": {
-            "label": "12 (192.168.121.12)",
-            "stream": "http://example/sen66",
-            "nc_stream": "http://example/sen66/nc",
+            "label": "Lab Pi",
+            "default": "http://example/12/sen66/main/default",
+            "number_concentration": "http://example/12/sen66/main/number_concentration",
         }
     }
     assert settings["h10_devices"] == {
@@ -120,18 +113,18 @@ def test_build_settings_shapes_device_maps_and_nests_h10_by_node() -> None:
             "label": "Test H10 A",
             "device": "12",
             "h10_id": "strap-a",
-            "stream": "http://example/h10/strap-a/stream",
-            "ecg_stream": "http://example/h10/strap-a/ecg-stream",
-            "acc_stream": "http://example/h10/strap-a/acc-stream",
+            "default": "http://example/12/h10/strap-a/default",
+            "ecg": "http://example/12/h10/strap-a/ecg",
+            "acc": "http://example/12/h10/strap-a/acc",
         },
         "12:strap-b": {
             "label": "strap-b",
             "device": "12",
             "h10_id": "strap-b",
-            "stream": "http://example/h10/strap-b/stream",
-            "ecg_stream": None,
-            "acc_stream": None,
-        }
+            "default": "http://example/12/h10/strap-b/default",
+            "ecg": "http://example/12/h10/strap-b/ecg",
+            "acc": "http://example/12/h10/strap-b/acc",
+        },
     }
     assert settings["h10_device_options"] == {
         "12": {
@@ -140,5 +133,5 @@ def test_build_settings_shapes_device_maps_and_nests_h10_by_node() -> None:
         }
     }
     assert settings["h10_defaults"] == {"12": "12:strap-a"}
-    assert settings["all_devices"] == {"12": "12 (192.168.121.12)"}
+    assert settings["all_devices"] == {"12": "Lab Pi"}
     assert settings["all_devices_default"] == "12"

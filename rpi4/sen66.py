@@ -1,5 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
+import sys
 from typing import Dict, Optional
 
 import httpx
@@ -7,15 +9,11 @@ from sensirion_driver_adapters.i2c_adapter.i2c_channel import I2cChannel
 from sensirion_i2c_driver import CrcCalculator, I2cConnection, LinuxI2cTransceiver
 from sensirion_i2c_sen66.device import Sen66Device
 
-try:
-    from relay_push import detect_node_id, log_post_failure, post_payload, relay_timeout
-except ImportError:
-    from rpi4.relay_push import (
-        detect_node_id,
-        log_post_failure,
-        post_payload,
-        relay_timeout,
-    )
+if __package__ in (None, ""):
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from rpi4.relay_push import detect_node_id, log_post_failure, post_payload, relay_timeout
+from shared.streams import ingest_path
 
 
 def _safe(signal):
@@ -100,7 +98,7 @@ async def push_environmental_loop(
     client_factory=httpx.AsyncClient,
 ) -> None:
     node_id = node_id or detect_node_id()
-    path = f"ingest/sen66/{node_id}/stream"
+    path = ingest_path("sen66", node_id)
     frame = 0
     async with client_factory(timeout=relay_timeout()) as client:
         while max_frames is None or frame < max_frames:
@@ -123,7 +121,7 @@ async def push_number_concentration_loop(
     client_factory=httpx.AsyncClient,
 ) -> None:
     node_id = node_id or detect_node_id()
-    path = f"ingest/sen66/{node_id}/nc-stream"
+    path = ingest_path("sen66", node_id, "number_concentration")
     frame = 0
     async with client_factory(timeout=relay_timeout()) as client:
         while max_frames is None or frame < max_frames:

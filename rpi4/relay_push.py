@@ -1,6 +1,7 @@
 import logging
 import os
 import socket
+import sys
 import time
 from urllib.parse import urlparse
 
@@ -8,6 +9,13 @@ import httpx
 
 
 log = logging.getLogger(__name__)
+
+# Keep top-level and package imports pinned to the same module object so
+# process-global backoff state stays consistent across runtime code and tests.
+if __name__ == "relay_push":
+    sys.modules.setdefault("rpi4.relay_push", sys.modules[__name__])
+elif __name__ == "rpi4.relay_push":
+    sys.modules.setdefault("relay_push", sys.modules[__name__])
 
 RELAY_BASE_URL = os.getenv("PI_PULSE_RELAY_URL", "http://192.168.121.1:8010").rstrip("/")
 RELAY_TIMEOUT_S = float(os.getenv("PI_PULSE_RELAY_TIMEOUT_S", "5"))

@@ -1,19 +1,17 @@
 import asyncio
 import time
+from pathlib import Path
+import sys
 from typing import Any, Dict, Optional, Tuple
 
 import httpx
 import psutil
 
-try:
-    from relay_push import detect_node_id, log_post_failure, post_payload, relay_timeout
-except ImportError:
-    from rpi4.relay_push import (
-        detect_node_id,
-        log_post_failure,
-        post_payload,
-        relay_timeout,
-    )
+if __package__ in (None, ""):
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from rpi4.relay_push import detect_node_id, log_post_failure, post_payload, relay_timeout
+from shared.streams import ingest_path
 
 
 def read_soc_temp_c() -> Optional[float]:
@@ -125,7 +123,7 @@ async def push_metrics_loop(
 ) -> None:
     """Push Pi metrics snapshots to the relay."""
     node_id = node_id or detect_node_id()
-    path = f"ingest/pulse/{node_id}/stream"
+    path = ingest_path("pulse", node_id)
 
     psutil.cpu_percent(interval=None)
     psutil.cpu_percent(interval=None, percpu=True)

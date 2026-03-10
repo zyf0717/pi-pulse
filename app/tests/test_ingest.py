@@ -45,13 +45,13 @@ def _load_ingest_module(monkeypatch):
 
     fake_config = ModuleType("app.config")
     fake_config.DEVICES = {
-        "10": {"label": "10 (192.168.121.10)", "url": "http://pulse-10"}
+        "10": {"label": "10 (192.168.121.10)", "default": "http://pulse-10"}
     }
     fake_config.SEN66_DEVICES = {
         "11": {
             "label": "11 (192.168.121.11)",
-            "stream": "http://sen66-11",
-            "nc_stream": "http://sen66-11/nc",
+            "default": "http://sen66-11",
+            "number_concentration": "http://sen66-11/nc",
         }
     }
     fake_config.H10_DEVICES = {
@@ -59,9 +59,9 @@ def _load_ingest_module(monkeypatch):
             "label": "6FFF5628",
             "device": "11",
             "h10_id": "6FFF5628",
-            "stream": "http://h10-11",
-            "ecg_stream": "http://h10-11/ecg",
-            "acc_stream": "http://h10-11/acc",
+            "default": "http://h10-11",
+            "ecg": "http://h10-11/ecg",
+            "acc": "http://h10-11/acc",
         }
     }
     fake_config.H10_ACC_DYNAMIC_WINDOW_S = 0.5

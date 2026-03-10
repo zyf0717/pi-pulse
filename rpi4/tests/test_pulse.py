@@ -140,7 +140,7 @@ def test_push_metrics_loop_posts_to_relay_with_detected_node_id():
 
     assert len(instances) == 1
     assert instances[0].posts == [
-        ("http://192.168.121.1:8010/ingest/pulse/10/stream", payload)
+        ("http://192.168.121.1:8010/ingest/10/pulse/main/default", payload)
     ]
 
 

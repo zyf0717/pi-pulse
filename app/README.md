@@ -19,6 +19,8 @@ Pi-side deployment is documented separately in [../rpi4/README.md](../rpi4/READM
 - [ingest.py](ingest.py): process-global SSE ingest state, normalization, and startup
 - [config.py](config.py): parses [config.yaml](config.yaml) into app-facing settings
 
+The allowed stream keys and route segments are defined centrally in [../shared/streams.py](../shared/streams.py).
+
 ## Config Model
 
 The dashboard is node-centric.
@@ -26,31 +28,29 @@ The dashboard is node-centric.
 Each top-level key in [config.yaml](config.yaml) is one Pi node:
 
 ```yaml
+relay_base_url: http://127.0.0.1:8010
+
 devices:
   "10":
-    pulse:
-      stream: http://127.0.0.1:8010/pulse/10/stream
+    pulse: {}
 
   "11":
-    pulse:
-      stream: http://127.0.0.1:8010/pulse/11/stream
-    sen66:
-      stream: http://127.0.0.1:8010/sen66/11/stream
-      nc-stream: http://127.0.0.1:8010/sen66/11/nc-stream
+    pulse: {}
+    sen66: {}
     h10:
-      "6FFF5628":
-        stream: http://127.0.0.1:8010/h10/6FFF5628/stream
-        ecg-stream: http://127.0.0.1:8010/h10/6FFF5628/ecg-stream
-        acc-stream: http://127.0.0.1:8010/h10/6FFF5628/acc-stream
+      "6FFF5628": {}
 ```
 
 Rules:
 
-- one node can have one `pulse`
-- one node can have one `sen66`
-- one node can have multiple `h10`
+- relay routes follow `/{device_id}/{system}/{instance}/{stream}`
+- ingest routes follow `/ingest/{device_id}/{system}/{instance}/{stream}`
+- singleton systems use `main` as the instance segment
+- one node can have one `pulse`, one `sen66`, one `gps`, and multiple `h10` instances
+- the app derives the actual relay URLs from `relay_base_url` plus the shared stream contract
 - the main dashboard selector chooses the node
-- the H10 tab shows a second selector only when that node has H10 streams
+- the H10 tab shows a second selector only when that node has multiple H10 instances
+- [config.py](config.py) builds the relay URLs from [../shared/streams.py](../shared/streams.py)
 
 ## Run
 
@@ -67,7 +67,7 @@ The app binds to `127.0.0.1:8009`.
 
 Runtime flow:
 
-1. [config.py](config.py) loads [config.yaml](config.yaml) and builds `DEVICES`, `SEN66_DEVICES`, `H10_DEVICES`, and selector metadata.
+1. [config.py](config.py) loads [config.yaml](config.yaml), validates configured stream keys against the shared registry, and builds `DEVICES`, `SEN66_DEVICES`, `H10_DEVICES`, and selector metadata.
 2. [ingest.py](ingest.py) owns one process-global ingest set and starts one SSE consumer per configured relay stream using [streams/consumer.py](streams/consumer.py).
 3. Incoming payloads are normalized and written into small bounded `deque` histories plus `reactive.Value` state shared by all browser sessions in that app process.
 4. [server.py](server.py) does not open per-session upstream streams; it only binds the active Shiny session to the shared ingest state and registers renders.
@@ -81,7 +81,7 @@ If the shared ingest task set becomes unhealthy, `ingest.py` invalidates it and 
 The current app structure reflects a few deliberate architecture changes:
 
 - Node-centric config:
-  `config.yaml` is organized by Pi node, not by sensor type. One node can have one `pulse`, one `sen66`, and multiple `h10` streams.
+  `config.yaml` is organized by Pi node, not by sensor type. One node can have one `pulse`, one `sen66`, and multiple `h10` instances under a standardized `device/system/instance/stream` URI model.
 
 - Process-global ingest:
   relay SSE connections are shared per app process. Opening additional browser sessions no longer creates additional upstream streams.

@@ -45,8 +45,8 @@ def test_detect_node_id_uses_local_ip_last_octet():
 def test_ingest_url_joins_paths_cleanly():
     relay_push = _load_relay_push()
     assert (
-        relay_push.ingest_url("/ingest/pulse/10/stream", "http://192.168.121.1:8010")
-        == "http://192.168.121.1:8010/ingest/pulse/10/stream"
+        relay_push.ingest_url("/ingest/10/pulse/main/default", "http://192.168.121.1:8010")
+        == "http://192.168.121.1:8010/ingest/10/pulse/main/default"
     )
 
 

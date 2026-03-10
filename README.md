@@ -7,6 +7,7 @@ The repo has three main runtime parts:
 - `app/`: the Shiny for Python dashboard
 - `relay/`: the local push-to-pull relay on the dashboard host
 - `rpi4/`: Raspberry Pi sensor workers that push sensor payloads to the relay
+- `shared/`: the stream contract shared by all three runtime parts
 
 ## Components
 
@@ -23,6 +24,7 @@ Pi-Pulse is split by responsibility:
 - `rpi4/` acquires sensor data and pushes JSON payloads upstream to the relay
 - `relay/` accepts Pi pushes and exposes app-compatible SSE pull endpoints
 - `app/` consumes those SSE streams from the relay, holds short in-memory histories, and renders the dashboard
+- `shared/streams.py` defines the canonical families, channels, route segments, and config fields
 
 High-level flow:
 
@@ -33,6 +35,24 @@ High-level flow:
 5. The app normalizes incoming data into bounded reactive state and short FIFO histories.
 6. The UI renders cards and charts from that state.
 7. ECG is the special case: the app forwards raw ECG chunks to the browser, and the browser draws the sweep client-side with Plotly.
+
+## Shared Stream Contract
+
+Route, path, and config naming now come from [shared/streams.py](shared/streams.py).
+
+The current registry defines:
+
+- systems: `pulse`, `sen66`, `h10`, `gps`
+- devices: Pi node IDs such as `10` or `11`
+- instances: `main` for singleton systems, or a concrete H10 strap ID
+- streams: `default`, `number_concentration`, `ecg`, `acc`
+- standardized route order: `device/system/instance/stream`
+
+That contract is used by:
+
+- `rpi4/` to build relay ingest paths
+- `relay/` to generate POST and GET routes
+- `app/` to validate and normalize configured stream URLs
 
 ## Repo Layout
 
@@ -64,6 +84,9 @@ High-level flow:
 │   ├── sse.py
 │   ├── *.service
 │   └── tests/
+├── shared/
+│   ├── __init__.py
+│   └── streams.py
 ├── environment.yml
 └── README.md
 ```
@@ -87,33 +110,30 @@ Dashboard config lives in [app/config.yaml](app/config.yaml).
 Current shape:
 
 ```yaml
+relay_base_url: http://127.0.0.1:8010
+
 devices:
   "10":
-    pulse:
-      stream: http://127.0.0.1:8010/pulse/10/stream
+    pulse: {}
 
   "11":
-    pulse:
-      stream: http://127.0.0.1:8010/pulse/11/stream
-    sen66:
-      stream: http://127.0.0.1:8010/sen66/11/stream
-      nc-stream: http://127.0.0.1:8010/sen66/11/nc-stream
+    pulse: {}
+    sen66: {}
     h10:
-      "6FFF5628":
-        stream: http://127.0.0.1:8010/h10/6FFF5628/stream
-        ecg-stream: http://127.0.0.1:8010/h10/6FFF5628/ecg-stream
-        acc-stream: http://127.0.0.1:8010/h10/6FFF5628/acc-stream
+      "6FFF5628": {}
 ```
 
 Rules:
 
-- each top-level key is one Pi node, such as `"10"` or `"11"`
-- a node can have:
-  - one `pulse`
-  - one `sen66`
-  - multiple `h10` streams
+- each top-level key is one node, such as `"10"` or `"11"` or `"pixel-7"`
+- relay URIs are standardized as `/{device_id}/{system}/{instance}/{stream}` for SSE and `/ingest/{device_id}/{system}/{instance}/{stream}` for ingest
+- singleton systems use `main` as the instance segment
+- `h10` uses the strap ID as the instance segment, so multiple H10 straps can hang off one node
+- a node can have one `pulse`, one `sen66`, one `gps`, and multiple `h10` instances
+- the app derives URLs from `relay_base_url` and the shared stream contract instead of storing full URLs in config
 - the dashboard device selector works at the node level
-- if a node has multiple H10 straps, the H10 tab shows an additional stream selector
+- if a node has multiple H10 straps, the H10 tab shows an additional instance selector
+- stream names come from [shared/streams.py](shared/streams.py)
 
 ## Runtime Model
 
@@ -133,7 +153,7 @@ On the Pi side:
 - [rpi4/sen66.py](rpi4/sen66.py) pushes environmental metrics
 - [rpi4/h10.py](rpi4/h10.py) pushes multi-H10 HR, ECG, and ACC payloads
 
-The relay converts those pushes back into GET SSE endpoints. Expected payload shapes are documented in [app/README.md](app/README.md).
+The relay converts those pushes back into GET SSE endpoints from the shared registry. Expected payload shapes are documented in [app/README.md](app/README.md).
 
 ## Run
 

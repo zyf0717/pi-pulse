@@ -2,6 +2,8 @@
 
 `rpi4/` contains the Pi-side workers that read local sensors and push payloads to the relay on the dashboard host.
 
+Route names and ingest paths come from [../shared/streams.py](../shared/streams.py).
+
 Workers:
 
 - `pulse.py`: Pi health metrics worker
@@ -71,24 +73,25 @@ PI_PULSE_RELAY_URL=http://192.168.121.1:8010
 
 ## Run Locally
 
-From `rpi4/`:
+Preferred, from the repo root:
 
 ```bash
 conda activate pi-pulse
-cd rpi4
-python pulse.py
-python sen66.py
-python h10.py
+python -m rpi4.pulse
+python -m rpi4.sen66
+python -m rpi4.h10
 ```
 
-These workers do not expose HTTP routes themselves. They push into the relay:
+Equivalent direct script execution from `rpi4/` still works.
 
-- `POST /ingest/pulse/{node_id}/stream`
-- `POST /ingest/sen66/{node_id}/stream`
-- `POST /ingest/sen66/{node_id}/nc-stream`
-- `POST /ingest/h10/{device_id}/stream`
-- `POST /ingest/h10/{device_id}/ecg-stream`
-- `POST /ingest/h10/{device_id}/acc-stream`
+These workers do not expose HTTP routes themselves. They push into the relay, and those routes are generated from the shared contract:
+
+- `POST /ingest/{device_id}/pulse/main/default`
+- `POST /ingest/{device_id}/sen66/main/default`
+- `POST /ingest/{device_id}/sen66/main/number_concentration`
+- `POST /ingest/{device_id}/h10/{instance_id}/default`
+- `POST /ingest/{device_id}/h10/{instance_id}/ecg`
+- `POST /ingest/{device_id}/h10/{instance_id}/acc`
 
 ## Expected Output
 
@@ -203,25 +206,25 @@ Use `sudo -E` so the active `CONDA_PREFIX` is preserved and the correct `python`
 The dashboard is node-centric. Each top-level key in [app/config.yaml](../app/config.yaml) is one Pi node, for example:
 
 ```yaml
+relay_base_url: http://127.0.0.1:8010
+
 devices:
   "11":
-    pulse:
-      stream: http://127.0.0.1:8010/pulse/11/stream
-    sen66:
-      stream: http://127.0.0.1:8010/sen66/11/stream
-      nc-stream: http://127.0.0.1:8010/sen66/11/nc-stream
+    pulse: {}
+    sen66: {}
     h10:
-      "6FFF5628":
-        stream: http://127.0.0.1:8010/h10/6FFF5628/stream
-        ecg-stream: http://127.0.0.1:8010/h10/6FFF5628/ecg-stream
-        acc-stream: http://127.0.0.1:8010/h10/6FFF5628/acc-stream
+      "6FFF5628": {}
 ```
 
 One node can have:
 
-- one `pulse`
-- one `sen66`
-- multiple `h10`
+- one `pulse` instance at `main`
+- one `sen66` instance at `main`
+- one `gps` instance at `main`
+- multiple `h10` instances keyed by strap ID
+
+Relay SSE routes use `/{device_id}/{system}/{instance}/{stream}`.
+Relay ingest routes use `/ingest/{device_id}/{system}/{instance}/{stream}`.
 
 ## Tests
 

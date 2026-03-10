@@ -382,8 +382,8 @@ def test_sen66_value_boxes_format_current_snapshot(monkeypatch) -> None:
             "SEN66_DEVICES": {
                 "11": {
                     "label": "11 (192.168.121.11)",
-                    "stream": "http://sen66-11",
-                    "nc_stream": "http://sen66-11/nc",
+                    "default": "http://sen66-11",
+                    "number_concentration": "http://sen66-11/nc",
                 }
             }
         },
@@ -425,8 +425,8 @@ def test_sen66_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> No
             "SEN66_DEVICES": {
                 "11": {
                     "label": "11 (192.168.121.11)",
-                    "stream": "http://sen66-11",
-                    "nc_stream": "http://sen66-11/nc",
+                    "default": "http://sen66-11",
+                    "number_concentration": "http://sen66-11/nc",
                 }
             }
         },
@@ -463,9 +463,9 @@ def test_h10_value_boxes_format_current_snapshot(monkeypatch) -> None:
             "H10_DEVICES": {
                 "11": {
                     "label": "11 (192.168.121.11)",
-                    "stream": "http://h10-11",
-                    "ecg_stream": "http://h10-11/ecg",
-                    "acc_stream": "http://h10-11/acc",
+                    "default": "http://h10-11",
+                    "ecg": "http://h10-11/ecg",
+                    "acc": "http://h10-11/acc",
                 }
             },
             "H10_CHARTS": {
@@ -534,12 +534,12 @@ def test_h10_selector_is_rendered_for_nodes_with_multiple_streams(monkeypatch) -
                 "11:strap-a": {
                     "label": "Chest A",
                     "device": "11",
-                    "stream": "http://h10-11/a",
+                    "default": "http://h10-11/a",
                 },
                 "11:strap-b": {
                     "label": "Chest B",
                     "device": "11",
-                    "stream": "http://h10-11/b",
+                    "default": "http://h10-11/b",
                 },
             },
             "H10_DEVICE_OPTIONS": {
@@ -606,7 +606,7 @@ def test_h10_single_stream_does_not_require_dynamic_selector_input(monkeypatch) 
                 "11:strap-a": {
                     "label": "Chest A",
                     "device": "11",
-                    "stream": "http://h10-11/a",
+                    "default": "http://h10-11/a",
                 }
             },
             "H10_DEVICE_OPTIONS": {
@@ -638,9 +638,9 @@ def test_h10_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> None
             "H10_DEVICES": {
                 "11": {
                     "label": "11 (192.168.121.11)",
-                    "stream": "http://h10-11",
-                    "ecg_stream": "http://h10-11/ecg",
-                    "acc_stream": "http://h10-11/acc",
+                    "default": "http://h10-11",
+                    "ecg": "http://h10-11/ecg",
+                    "acc": "http://h10-11/acc",
                 }
             },
             "H10_CHARTS": {
@@ -687,7 +687,7 @@ def test_pulse_invalid_device_clears_chart_and_resets_state(monkeypatch) -> None
         "pulse.py",
         {
             "DEVICES": {
-                "10": {"label": "10 (192.168.121.10)", "url": "http://pulse-10"}
+                "10": {"label": "10 (192.168.121.10)", "default": "http://pulse-10"}
             },
             "PULSE_CHARTS": {
                 "cpu": "CPU Usage (%)",
@@ -727,8 +727,8 @@ def test_sen66_invalid_device_clears_chart_sets_annotation_and_resets_state(
             "SEN66_DEVICES": {
                 "11": {
                     "label": "11 (192.168.121.11)",
-                    "stream": "http://sen66-11",
-                    "nc_stream": "http://sen66-11/nc",
+                    "default": "http://sen66-11",
+                    "number_concentration": "http://sen66-11/nc",
                 }
             }
         },
@@ -766,9 +766,9 @@ def test_h10_invalid_device_clears_chart_sets_annotation_and_resets_state(
             "H10_DEVICES": {
                 "11": {
                     "label": "11 (192.168.121.11)",
-                    "stream": "http://h10-11",
-                    "ecg_stream": "http://h10-11/ecg",
-                    "acc_stream": "http://h10-11/acc",
+                    "default": "http://h10-11",
+                    "ecg": "http://h10-11/ecg",
+                    "acc": "http://h10-11/acc",
                 }
             },
             "H10_CHARTS": {
@@ -817,9 +817,9 @@ def test_h10_ecg_chart_streams_sweep_messages(monkeypatch) -> None:
             "H10_DEVICES": {
                 "11": {
                     "label": "11 (192.168.121.11)",
-                    "stream": "http://h10-11",
-                    "ecg_stream": "http://h10-11/ecg",
-                    "acc_stream": "http://h10-11/acc",
+                    "default": "http://h10-11",
+                    "ecg": "http://h10-11/ecg",
+                    "acc": "http://h10-11/acc",
                 }
             },
             "H10_CHARTS": {
@@ -909,9 +909,9 @@ def test_h10_dynamic_accel_chart_uses_per_second_history(monkeypatch) -> None:
             "H10_DEVICES": {
                 "11": {
                     "label": "11 (192.168.121.11)",
-                    "stream": "http://h10-11",
-                    "ecg_stream": "http://h10-11/ecg",
-                    "acc_stream": "http://h10-11/acc",
+                    "default": "http://h10-11",
+                    "ecg": "http://h10-11/ecg",
+                    "acc": "http://h10-11/acc",
                 }
             },
             "H10_CHARTS": {
@@ -963,9 +963,9 @@ def test_h10_motion_chart_renders_svg_detail_instead_of_plotly(monkeypatch) -> N
             "H10_DEVICES": {
                 "11": {
                     "label": "11 (192.168.121.11)",
-                    "stream": "http://h10-11",
-                    "ecg_stream": "http://h10-11/ecg",
-                    "acc_stream": "http://h10-11/acc",
+                    "default": "http://h10-11",
+                    "ecg": "http://h10-11/ecg",
+                    "acc": "http://h10-11/acc",
                 }
             },
             "H10_CHARTS": {
@@ -1017,7 +1017,7 @@ def test_pulse_empty_history_leaves_existing_chart_unchanged(monkeypatch) -> Non
         "pulse.py",
         {
             "DEVICES": {
-                "10": {"label": "10 (192.168.121.10)", "url": "http://pulse-10"}
+                "10": {"label": "10 (192.168.121.10)", "default": "http://pulse-10"}
             },
             "PULSE_CHARTS": {
                 "cpu": "CPU Usage (%)",
@@ -1055,8 +1055,8 @@ def test_sen66_empty_history_leaves_existing_chart_unchanged(monkeypatch) -> Non
             "SEN66_DEVICES": {
                 "11": {
                     "label": "11 (192.168.121.11)",
-                    "stream": "http://sen66-11",
-                    "nc_stream": "http://sen66-11/nc",
+                    "default": "http://sen66-11",
+                    "number_concentration": "http://sen66-11/nc",
                 }
             }
         },

@@ -149,10 +149,10 @@ def test_build_notification_handlers_publish_expected_stream_payloads():
     pmd_handler(0, bytearray(_build_acc_packet([(1, -2, 3)])))
 
     assert published == [
-        ("stream", {"bpm": 72, "rr_ms": [1000]}),
-        ("ecg-stream", {"samples_uv": [100, -200, 300], "sample_rate_hz": 130}),
+        ("default", {"bpm": 72, "rr_ms": [1000]}),
+        ("ecg", {"samples_uv": [100, -200, 300], "sample_rate_hz": 130}),
         (
-            "acc-stream",
+            "acc",
             {
                 "samples_mg": [{"x_mg": 1, "y_mg": -2, "z_mg": 3}],
                 "sample_rate_hz": 200,

@@ -1,19 +1,29 @@
 """Push-to-pull relay for Pi-Pulse sensor streams."""
 
 import asyncio
+import sys
 from dataclasses import dataclass, field
-from typing import Optional
+from pathlib import Path
 
 import uvicorn
-from fastapi import Body, FastAPI
+from fastapi import Body, FastAPI, HTTPException
+
+if __package__ in (None, ""):
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from relay.config import HOST, PORT, QUEUE_MAXSIZE
 from rpi4.sse import encode_sse, queue_stream, sse_response
+from shared.streams import (
+    DEFAULT_INSTANCE,
+    is_multi_instance,
+    is_valid_stream,
+    stream_key,
+)
 
 
 @dataclass
 class StreamState:
-    latest: Optional[dict] = None
+    latest: dict | None = None
     subscribers: list[asyncio.Queue] = field(default_factory=list)
     subscribers_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
@@ -21,30 +31,37 @@ class StreamState:
 _STREAMS: dict[str, StreamState] = {}
 
 
-def _stream_state(stream_key: str) -> StreamState:
-    state = _STREAMS.get(stream_key)
+def _stream_state(key: str) -> StreamState:
+    state = _STREAMS.get(key)
     if state is None:
         state = StreamState()
-        _STREAMS[stream_key] = state
+        _STREAMS[key] = state
     return state
 
 
-def _publish(stream_key: str, payload: dict) -> None:
-    state = _stream_state(stream_key)
+def _validate_path(system_key: str, instance_id: str, stream_name: str) -> None:
+    if not is_valid_stream(system_key, stream_name):
+        raise HTTPException(status_code=404, detail="Unknown stream")
+    if is_multi_instance(system_key):
+        if instance_id == DEFAULT_INSTANCE:
+            raise HTTPException(status_code=404, detail="Missing instance")
+        return
+    if instance_id != DEFAULT_INSTANCE:
+        raise HTTPException(status_code=404, detail="Unexpected instance")
+
+
+def _publish(key: str, payload: dict) -> None:
+    state = _stream_state(key)
     state.latest = payload
-    for q in list(state.subscribers):
+    for queue in list(state.subscribers):
         try:
-            q.put_nowait(payload)
+            queue.put_nowait(payload)
         except asyncio.QueueFull:
             pass
 
 
-async def _relay_stream(
-    stream_key: str,
-    *,
-    max_frames: Optional[int] = None,
-):
-    state = _stream_state(stream_key)
+async def _relay_stream(key: str, *, max_frames: int | None = None):
+    state = _stream_state(key)
     emitted = 0
     if state.latest is not None:
         yield encode_sse(state.latest)
@@ -74,75 +91,33 @@ async def health():
     }
 
 
-@app.post("/ingest/pulse/{node_id}/stream")
-async def ingest_pulse(node_id: str, payload: dict = Body(...)):
-    _publish(f"pulse/{node_id}/stream", payload)
+@app.post("/ingest/{device_id}/{system_key}/{instance_id}/{stream_name}")
+async def ingest(
+    device_id: str,
+    system_key: str,
+    instance_id: str,
+    stream_name: str,
+    payload: dict = Body(...),
+):
+    _validate_path(system_key, instance_id, stream_name)
+    _publish(stream_key(system_key, device_id, stream_name, instance_id=instance_id), payload)
     return {"ok": True}
 
 
-@app.post("/ingest/sen66/{node_id}/stream")
-async def ingest_sen66(node_id: str, payload: dict = Body(...)):
-    _publish(f"sen66/{node_id}/stream", payload)
-    return {"ok": True}
-
-
-@app.post("/ingest/sen66/{node_id}/nc-stream")
-async def ingest_sen66_nc(node_id: str, payload: dict = Body(...)):
-    _publish(f"sen66/{node_id}/nc-stream", payload)
-    return {"ok": True}
-
-
-@app.post("/ingest/h10/{device_id}/stream")
-async def ingest_h10(device_id: str, payload: dict = Body(...)):
-    _publish(f"h10/{device_id}/stream", payload)
-    return {"ok": True}
-
-
-@app.post("/ingest/h10/{device_id}/ecg-stream")
-async def ingest_h10_ecg(device_id: str, payload: dict = Body(...)):
-    _publish(f"h10/{device_id}/ecg-stream", payload)
-    return {"ok": True}
-
-
-@app.post("/ingest/h10/{device_id}/acc-stream")
-async def ingest_h10_acc(device_id: str, payload: dict = Body(...)):
-    _publish(f"h10/{device_id}/acc-stream", payload)
-    return {"ok": True}
-
-
-@app.get("/pulse/{node_id}/stream")
-async def pulse_stream(node_id: str, max_frames: Optional[int] = None):
-    return sse_response(_relay_stream(f"pulse/{node_id}/stream", max_frames=max_frames))
-
-
-@app.get("/sen66/{node_id}/stream")
-async def sen66_stream(node_id: str, max_frames: Optional[int] = None):
-    return sse_response(_relay_stream(f"sen66/{node_id}/stream", max_frames=max_frames))
-
-
-@app.get("/sen66/{node_id}/nc-stream")
-async def sen66_nc_stream(node_id: str, max_frames: Optional[int] = None):
+@app.get("/{device_id}/{system_key}/{instance_id}/{stream_name}")
+async def stream(
+    device_id: str,
+    system_key: str,
+    instance_id: str,
+    stream_name: str,
+    max_frames: int | None = None,
+):
+    _validate_path(system_key, instance_id, stream_name)
     return sse_response(
-        _relay_stream(f"sen66/{node_id}/nc-stream", max_frames=max_frames)
-    )
-
-
-@app.get("/h10/{device_id}/stream")
-async def h10_stream(device_id: str, max_frames: Optional[int] = None):
-    return sse_response(_relay_stream(f"h10/{device_id}/stream", max_frames=max_frames))
-
-
-@app.get("/h10/{device_id}/ecg-stream")
-async def h10_ecg_stream(device_id: str, max_frames: Optional[int] = None):
-    return sse_response(
-        _relay_stream(f"h10/{device_id}/ecg-stream", max_frames=max_frames)
-    )
-
-
-@app.get("/h10/{device_id}/acc-stream")
-async def h10_acc_stream(device_id: str, max_frames: Optional[int] = None):
-    return sse_response(
-        _relay_stream(f"h10/{device_id}/acc-stream", max_frames=max_frames)
+        _relay_stream(
+            stream_key(system_key, device_id, stream_name, instance_id=instance_id),
+            max_frames=max_frames,
+        )
     )
 
 
