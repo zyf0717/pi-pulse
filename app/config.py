@@ -45,6 +45,7 @@ def build_settings(raw_config: Mapping) -> dict:
     all_devices: dict[str, str] = {}
     devices: dict[str, dict] = {}
     sen66_devices: dict[str, dict] = {}
+    gps_devices: dict[str, dict] = {}
     h10_devices: dict[str, dict] = {}
     h10_device_options: dict[str, dict[str, str]] = {}
     h10_defaults: dict[str, str] = {}
@@ -74,6 +75,15 @@ def build_settings(raw_config: Mapping) -> dict:
                 "number_concentration": _relay_url(
                     relay_base_url,
                     stream_path("sen66", device_id, "number_concentration"),
+                ),
+            }
+
+        if "gps" in value:
+            gps_devices[device_id] = {
+                "label": label,
+                DEFAULT_STREAM: _relay_url(
+                    relay_base_url,
+                    stream_path("gps", device_id),
                 ),
             }
 
@@ -112,6 +122,7 @@ def build_settings(raw_config: Mapping) -> dict:
     return {
         "devices": devices,
         "sen66_devices": sen66_devices,
+        "gps_devices": gps_devices,
         "h10_devices": h10_devices,
         "h10_device_options": h10_device_options,
         "h10_defaults": h10_defaults,
@@ -124,6 +135,7 @@ _SETTINGS = build_settings(load_raw_config())
 
 DEVICES = _SETTINGS["devices"]
 SEN66_DEVICES = _SETTINGS["sen66_devices"]
+GPS_DEVICES = _SETTINGS["gps_devices"]
 H10_DEVICES = _SETTINGS["h10_devices"]
 H10_DEVICE_OPTIONS = _SETTINGS["h10_device_options"]
 H10_DEFAULTS = _SETTINGS["h10_defaults"]

@@ -18,6 +18,7 @@ def _load_server_module(monkeypatch):
         "ensure_ingest_started": 0,
         "pulse_register": [],
         "sen66_register": [],
+        "gps_register": [],
         "h10_register": [],
     }
 
@@ -55,6 +56,8 @@ def _load_server_module(monkeypatch):
         sen66_nc_latest={"11": object()},
         sen66_history={"11": []},
         sen66_nc_history={"11": []},
+        gps_latest={"pixel-7": object()},
+        gps_history={"pixel-7": []},
         h10_latest={"11:6FFF5628": object()},
         h10_history={"11:6FFF5628": []},
         h10_ecg_latest={"11:6FFF5628": object()},
@@ -86,11 +89,17 @@ def _load_server_module(monkeypatch):
     fake_sen66.register_sen66_renders = register_sen66_renders
 
     fake_h10 = ModuleType("app.renders.h10")
+    fake_gps = ModuleType("app.renders.gps")
 
     def register_h10_renders(*args) -> None:
         calls["h10_register"].append(args)
 
     fake_h10.register_h10_renders = register_h10_renders
+
+    def register_gps_renders(*args) -> None:
+        calls["gps_register"].append(args)
+
+    fake_gps.register_gps_renders = register_gps_renders
 
     monkeypatch.setitem(sys.modules, "app", fake_app)
     monkeypatch.setitem(sys.modules, "app.ingest", fake_ingest)
@@ -99,6 +108,7 @@ def _load_server_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "plotly", fake_plotly)
     monkeypatch.setitem(sys.modules, "plotly.graph_objects", fake_graph_objects)
     monkeypatch.setitem(sys.modules, "app.renders", fake_app_renders)
+    monkeypatch.setitem(sys.modules, "app.renders.gps", fake_gps)
     monkeypatch.setitem(sys.modules, "app.renders.pulse", fake_pulse)
     monkeypatch.setitem(sys.modules, "app.renders.sen66", fake_sen66)
     monkeypatch.setitem(sys.modules, "app.renders.h10", fake_h10)
@@ -126,6 +136,7 @@ def test_server_starts_global_ingest_and_registers_renders(monkeypatch) -> None:
     assert calls["ensure_ingest_started"] == 1
     assert len(calls["pulse_register"]) == 1
     assert len(calls["sen66_register"]) == 1
+    assert len(calls["gps_register"]) == 1
     assert len(calls["h10_register"]) == 1
 
 
@@ -137,6 +148,7 @@ def test_server_passes_shared_ingest_state_to_render_registration(monkeypatch) -
 
     pulse_args = calls["pulse_register"][0]
     sen66_args = calls["sen66_register"][0]
+    gps_args = calls["gps_register"][0]
     h10_args = calls["h10_register"][0]
 
     assert pulse_args[1] is ingest_state.pulse_latest
@@ -150,6 +162,9 @@ def test_server_passes_shared_ingest_state_to_render_registration(monkeypatch) -
     assert sen66_args[4] is ingest_state.sen66_nc_history
     assert isinstance(sen66_args[6], _FakeFigureWidget)
     assert sen66_args[7] == {"chart": None, "dev": None, "tpl": None}
+
+    assert gps_args[1] is ingest_state.gps_latest
+    assert gps_args[2] is ingest_state.gps_history
 
     assert h10_args[1] is ingest_state.h10_latest
     assert h10_args[2] is ingest_state.h10_history
@@ -171,8 +186,10 @@ def test_server_plotly_template_calc_reads_chart_style(monkeypatch) -> None:
 
     pulse_args = calls["pulse_register"][0]
     sen66_args = calls["sen66_register"][0]
+    gps_args = calls["gps_register"][0]
     h10_args = calls["h10_register"][0]
 
     assert pulse_args[0].chart_style() == "plotly_dark"
     assert sen66_args[0].chart_style() == "plotly_dark"
+    assert gps_args[0].chart_style() == "plotly_dark"
     assert h10_args[0].chart_style() == "plotly_dark"

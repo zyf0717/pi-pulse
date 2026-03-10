@@ -455,6 +455,78 @@ def test_sen66_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> No
     assert registry.ui["sen66_nox_spark"]() == ""
 
 
+def test_gps_value_boxes_format_current_snapshot(monkeypatch) -> None:
+    module, registry = _load_render_module(
+        monkeypatch,
+        "gps.py",
+        {
+            "GPS_DEVICES": {
+                "pixel-7": {
+                    "label": "pixel-7",
+                    "default": "http://gps-pixel-7",
+                }
+            }
+        },
+    )
+    input_obj = _FakeInput(device="pixel-7")
+    module.register_gps_renders(
+        input_obj,
+        {
+            "pixel-7": _FakeValue(
+                {
+                    "latitude": 1.352083,
+                    "longitude": 103.819836,
+                    "accuracy": 3.4,
+                    "altitude": 15.2,
+                    "speed": 0.8,
+                    "timestamp": "2026-03-10T08:00:00Z",
+                }
+            )
+        },
+        {"pixel-7": deque()},
+    )
+
+    assert registry.text["gps_lat_val"]() == "1.352083"
+    assert registry.text["gps_lon_val"]() == "103.819836"
+    assert registry.text["gps_accuracy_val"]() == "3.4 m"
+    assert registry.text["gps_altitude_val"]() == "15.2 m"
+    assert registry.text["gps_speed_val"]() == "0.8 m/s"
+    assert registry.text["gps_timestamp_val"]() == "2026-03-10T08:00:00Z"
+
+
+def test_gps_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> None:
+    module, registry = _load_render_module(
+        monkeypatch,
+        "gps.py",
+        {
+            "GPS_DEVICES": {
+                "pixel-7": {
+                    "label": "pixel-7",
+                    "default": "http://gps-pixel-7",
+                }
+            }
+        },
+    )
+    input_obj = _FakeInput(device="missing")
+    module.register_gps_renders(
+        input_obj,
+        {"pixel-7": _FakeValue({"latitude": 1.0})},
+        {"pixel-7": deque()},
+    )
+
+    assert registry.text["gps_lat_val"]() == "N/A"
+    assert registry.text["gps_lon_val"]() == "N/A"
+    assert registry.text["gps_accuracy_val"]() == "N/A"
+    assert registry.text["gps_altitude_val"]() == "N/A"
+    assert registry.text["gps_speed_val"]() == "N/A"
+    assert registry.text["gps_timestamp_val"]() == "N/A"
+    assert registry.ui["gps_lat_spark"]() == ""
+    assert registry.ui["gps_lon_spark"]() == ""
+    assert registry.ui["gps_accuracy_spark"]() == ""
+    assert registry.ui["gps_altitude_spark"]() == ""
+    assert registry.ui["gps_speed_spark"]() == ""
+
+
 def test_h10_value_boxes_format_current_snapshot(monkeypatch) -> None:
     module, registry = _load_render_module(
         monkeypatch,

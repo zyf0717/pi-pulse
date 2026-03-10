@@ -9,3 +9,6 @@ devices:
     sen66: {}
     h10:
       "EA78562C": {}
+
+  "pixel-7":
+    gps: {}

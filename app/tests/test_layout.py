@@ -189,6 +189,16 @@ def test_h10_cards_match_chart_mapping(monkeypatch) -> None:
     )
 
 
+def test_gps_cards_are_static_summary_cards(monkeypatch) -> None:
+    module = _load_layout_module(monkeypatch)
+
+    cards = module._gps_cards()
+
+    assert len(cards) == 6
+    assert all(card["tag"] == "card" for card in cards)
+    assert cards[-1]["args"][0]["args"][0] == "Timestamp"
+
+
 def test_h10_panel_includes_stream_selector_placeholder(monkeypatch) -> None:
     module = _load_layout_module(monkeypatch)
 
@@ -208,6 +218,15 @@ def test_h10_panel_includes_stream_selector_placeholder(monkeypatch) -> None:
         for item in control_row["args"]
         if isinstance(item, dict)
     )
+
+
+def test_app_ui_includes_gps_panel(monkeypatch) -> None:
+    module = _load_layout_module(monkeypatch)
+
+    navset = module.app_ui["args"][2]
+    panel_titles = [panel["args"][0] for panel in navset["args"] if isinstance(panel, dict)]
+
+    assert "GPS" in panel_titles
 
 
 def test_app_ui_includes_static_assets(monkeypatch) -> None:

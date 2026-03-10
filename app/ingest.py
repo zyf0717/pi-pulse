@@ -11,7 +11,13 @@ from datetime import datetime
 
 from shiny import reactive
 
-from app.config import DEVICES, H10_ACC_DYNAMIC_WINDOW_S, H10_DEVICES, SEN66_DEVICES
+from app.config import (
+    DEVICES,
+    GPS_DEVICES,
+    H10_ACC_DYNAMIC_WINDOW_S,
+    H10_DEVICES,
+    SEN66_DEVICES,
+)
 from app.streams.consumer import stream_consumer
 
 log = logging.getLogger(__name__)
@@ -133,6 +139,17 @@ def normalize_h10_acc_chunk(data: dict) -> dict:
     }
 
 
+def normalize_gps_sample(data: dict) -> dict:
+    sample = dict(data)
+    sample["latitude"] = _first_numeric(sample, "latitude")
+    sample["longitude"] = _first_numeric(sample, "longitude")
+    sample["accuracy"] = _first_numeric(sample, "accuracy")
+    sample["altitude"] = _first_numeric(sample, "altitude")
+    sample["speed"] = _first_numeric(sample, "speed")
+    sample["timestamp"] = str(sample.get("timestamp") or "")
+    return sample
+
+
 def _mean_dynamic_acceleration_mg(samples_mg: list[dict]) -> float:
     if not samples_mg:
         return 0.0
@@ -173,6 +190,8 @@ class IngestState:
     sen66_nc_latest: dict[str, reactive.Value]
     sen66_history: dict[str, deque]
     sen66_nc_history: dict[str, deque]
+    gps_latest: dict[str, reactive.Value]
+    gps_history: dict[str, deque]
     h10_latest: dict[str, reactive.Value]
     h10_history: dict[str, deque]
     h10_ecg_latest: dict[str, reactive.Value]
@@ -219,6 +238,14 @@ def build_ingest_state() -> IngestState:
         "nc_pm4_0_pcm3": 0.0,
         "nc_pm10_0_pcm3": 0.0,
     }
+    gps_default = {
+        "latitude": 0.0,
+        "longitude": 0.0,
+        "accuracy": 0.0,
+        "altitude": 0.0,
+        "speed": 0.0,
+        "timestamp": "",
+    }
     h10_default = {
         "heart_rate_bpm": 0.0,
         "rr_avg_ms": 0.0,
@@ -247,6 +274,8 @@ def build_ingest_state() -> IngestState:
         },
         sen66_history={k: deque(maxlen=60) for k in SEN66_DEVICES},
         sen66_nc_history={k: deque(maxlen=60) for k in SEN66_DEVICES},
+        gps_latest={k: reactive.Value(dict(gps_default)) for k in GPS_DEVICES},
+        gps_history={k: deque(maxlen=60) for k in GPS_DEVICES},
         h10_latest={k: reactive.Value(dict(h10_default)) for k in H10_DEVICES},
         h10_history={k: deque(maxlen=60) for k in H10_DEVICES},
         h10_ecg_latest={
@@ -286,6 +315,12 @@ async def _on_sen66(state: IngestState, key: str, data: dict) -> None:
 async def _on_sen66_nc(state: IngestState, key: str, data: dict) -> None:
     state.sen66_nc_history[key].append((datetime.now(), data))
     state.sen66_nc_latest[key].set(data)
+
+
+async def _on_gps(state: IngestState, key: str, data: dict) -> None:
+    normalized = normalize_gps_sample(data)
+    state.gps_history[key].append((datetime.now(), normalized))
+    state.gps_latest[key].set(normalized)
 
 
 async def _on_h10(state: IngestState, key: str, data: dict) -> None:
@@ -386,6 +421,16 @@ def _create_stream_tasks(state: IngestState) -> list:
                 )
             )
             for key, device in SEN66_DEVICES.items()
+        ]
+        + [
+            asyncio.create_task(
+                stream_consumer(
+                    f"gps-{key}",
+                    device["default"],
+                    lambda data, key=key: _on_gps(state, key, data),
+                )
+            )
+            for key, device in GPS_DEVICES.items()
         ]
         + [
             asyncio.create_task(

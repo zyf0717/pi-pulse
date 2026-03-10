@@ -54,6 +54,12 @@ def _load_ingest_module(monkeypatch):
             "number_concentration": "http://sen66-11/nc",
         }
     }
+    fake_config.GPS_DEVICES = {
+        "pixel-7": {
+            "label": "pixel-7",
+            "default": "http://gps-pixel-7",
+        }
+    }
     fake_config.H10_DEVICES = {
         "11:6FFF5628": {
             "label": "6FFF5628",
@@ -127,12 +133,13 @@ def test_ensure_global_ingest_started_starts_consumers_once(monkeypatch) -> None
     ingest_module.ensure_global_ingest_started(state)
 
     assert state.started is True
-    assert len(state.tasks) == 6
-    assert len(calls["stream_consumer"]) == 6
+    assert len(state.tasks) == 7
+    assert len(calls["stream_consumer"]) == 7
     assert [call["label"] for call in calls["stream_consumer"]] == [
         "pulse-10",
         "sen66-11",
         "sen66-nc-11",
+        "gps-pixel-7",
         "h10-11:6FFF5628",
         "h10-ecg-11:6FFF5628",
         "h10-acc-11:6FFF5628",
@@ -141,11 +148,12 @@ def test_ensure_global_ingest_started_starts_consumers_once(monkeypatch) -> None
         "http://pulse-10",
         "http://sen66-11",
         "http://sen66-11/nc",
+        "http://gps-pixel-7",
         "http://h10-11",
         "http://h10-11/ecg",
         "http://h10-11/acc",
     ]
-    assert len(calls["create_task"]) == 6
+    assert len(calls["create_task"]) == 7
 
 
 def test_dead_consumer_invalidates_task_set_and_next_ensure_restarts(monkeypatch) -> None:
@@ -164,9 +172,9 @@ def test_dead_consumer_invalidates_task_set_and_next_ensure_restarts(monkeypatch
     ingest_module.ensure_global_ingest_started(state)
 
     assert state.started is True
-    assert len(state.tasks) == 6
+    assert len(state.tasks) == 7
     assert state.tasks != first_generation
-    assert len(calls["create_task"]) == 12
+    assert len(calls["create_task"]) == 14
 
 
 def test_normalize_h10_sample_handles_common_ble_field_names(monkeypatch) -> None:

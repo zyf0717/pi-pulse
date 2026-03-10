@@ -42,10 +42,20 @@ def test_h10_devices_match_checked_in_config() -> None:
     assert config.H10_ACC_DYNAMIC_WINDOW_S == 0.5
 
 
+def test_gps_devices_match_checked_in_config() -> None:
+    assert config.GPS_DEVICES == {
+        "pixel-7": {
+            "label": "pixel-7",
+            "default": "http://127.0.0.1:8010/pixel-7/gps/main/default",
+        }
+    }
+
+
 def test_all_devices_and_defaults_match_current_config() -> None:
     assert config.ALL_DEVICES == {
         "10": "10 (192.168.121.10)",
         "11": "11 (192.168.121.11)",
+        "pixel-7": "pixel-7",
     }
     assert config.ALL_DEVICES_DEFAULT == "11"
 
@@ -67,6 +77,7 @@ def test_load_raw_config_reads_explicit_path(tmp_path: Path) -> None:
         '  "12":\n'
         '    pulse: {}\n'
         '    sen66: {}\n'
+        '    gps: {}\n'
         '    h10:\n'
         '      "strap-a": {}\n',
         encoding="utf-8",
@@ -77,6 +88,7 @@ def test_load_raw_config_reads_explicit_path(tmp_path: Path) -> None:
     assert loaded["relay_base_url"] == "http://example"
     assert loaded["devices"]["12"]["pulse"] == {}
     assert loaded["devices"]["12"]["sen66"] == {}
+    assert loaded["devices"]["12"]["gps"] == {}
     assert loaded["devices"]["12"]["h10"]["strap-a"] == {}
 
 
@@ -89,6 +101,7 @@ def test_build_settings_derives_urls_from_structured_config() -> None:
                     "label": "Lab Pi",
                     "pulse": {},
                     "sen66": {},
+                    "gps": {},
                     "h10": {
                         "strap-a": {"label": "Test H10 A"},
                         "strap-b": {},
@@ -106,6 +119,12 @@ def test_build_settings_derives_urls_from_structured_config() -> None:
             "label": "Lab Pi",
             "default": "http://example/12/sen66/main/default",
             "number_concentration": "http://example/12/sen66/main/number_concentration",
+        }
+    }
+    assert settings["gps_devices"] == {
+        "12": {
+            "label": "Lab Pi",
+            "default": "http://example/12/gps/main/default",
         }
     }
     assert settings["h10_devices"] == {

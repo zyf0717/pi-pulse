@@ -43,6 +43,14 @@ _H10_CARD_SPECS = [
     ("Mean Dynamic Acceleration", "h10_acc_val", "h10_acc_spark", "acc_dyn"),
 ]
 
+_GPS_CARD_SPECS = [
+    ("Latitude", "gps_lat_val", "gps_lat_spark"),
+    ("Longitude", "gps_lon_val", "gps_lon_spark"),
+    ("Accuracy", "gps_accuracy_val", "gps_accuracy_spark"),
+    ("Altitude", "gps_altitude_val", "gps_altitude_spark"),
+    ("Speed", "gps_speed_val", "gps_speed_spark"),
+]
+
 
 def _clickable_card(
     header_content,
@@ -94,6 +102,16 @@ def _visual_card(
         ui.output_ui(preview_output_id),
         chart_target=chart_target,
         chart_value=chart_value,
+    )
+
+
+def _static_metric_card(header_content, value_output_id: str, spark_output_id: str | None = None):
+    body_children = [ui.div(ui.output_text(value_output_id), class_="fs-3 fw-bold p-2")]
+    if spark_output_id is not None:
+        body_children.append(ui.output_ui(spark_output_id))
+    return ui.card(
+        ui.card_header(header_content),
+        ui.div(*body_children, class_=_CARD_BODY_CLASS),
     )
 
 
@@ -225,6 +243,15 @@ def _h10_cards():
     return cards
 
 
+def _gps_cards():
+    cards = [
+        _static_metric_card(title, value_output_id, spark_output_id)
+        for title, value_output_id, spark_output_id in _GPS_CARD_SPECS
+    ]
+    cards.append(_static_metric_card("Timestamp", "gps_timestamp_val"))
+    return cards
+
+
 def _system_panel():
     return ui.nav_panel(
         "System",
@@ -277,6 +304,14 @@ def _h10_panel():
     )
 
 
+def _gps_panel():
+    return ui.nav_panel(
+        "GPS",
+        ui.br(),
+        ui.layout_column_wrap(*_gps_cards(), fill=False),
+    )
+
+
 app_ui = ui.page_sidebar(
     ui.sidebar(
         ui.input_select(
@@ -307,6 +342,7 @@ app_ui = ui.page_sidebar(
         _system_panel(),
         _sen66_panel(),
         _h10_panel(),
+        _gps_panel(),
         selected="SEN66",
     ),
     theme=shinyswatch.theme.darkly,

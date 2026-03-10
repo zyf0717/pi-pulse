@@ -3,6 +3,7 @@ import shinyswatch
 from shiny import reactive
 
 from app.ingest import GLOBAL_INGEST, ensure_global_ingest_started
+from app.renders.gps import register_gps_renders
 from app.renders.h10 import register_h10_renders
 from app.renders.pulse import register_pulse_renders
 from app.renders.sen66 import register_sen66_renders
@@ -38,6 +39,12 @@ def server(input, output, session):
         plotly_tpl,
         sen66_widget,
         sen66_state,
+    )
+
+    register_gps_renders(
+        input,
+        GLOBAL_INGEST.gps_latest,
+        GLOBAL_INGEST.gps_history,
     )
 
     h10_widget = go.FigureWidget(layout=dict(autosize=True, height=400))
