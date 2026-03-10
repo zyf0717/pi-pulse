@@ -8,6 +8,15 @@ from app.renders.ecg_sweep import ECG_SWEEP_MESSAGE, build_ecg_sweep_message
 ECG_SWEEP_PLOT_ID = "h10_ecg_sweep"
 
 
+def ecg_sweep_plot_id(stream_key: str | None) -> str:
+    if not stream_key:
+        return ECG_SWEEP_PLOT_ID
+    safe_stream_key = "".join(
+        char if char.isalnum() else "_" for char in str(stream_key)
+    ).strip("_")
+    return f"{ECG_SWEEP_PLOT_ID}_{safe_stream_key}" if safe_stream_key else ECG_SWEEP_PLOT_ID
+
+
 def send_custom_message(session, name: str, payload: dict) -> None:
     if session is None:
         return
@@ -34,15 +43,24 @@ def update_ecg_sweep(
     if session is None:
         return
 
+    next_plot_id = ecg_sweep_plot_id(stream_key)
+    previous_plot_id = str(state.get("plot_id") or ECG_SWEEP_PLOT_ID)
+
     if chart != "ecg" or stream_key is None:
         if state["chart"] == "ecg":
             send_custom_message(
                 session,
                 ECG_SWEEP_MESSAGE,
-                {"plot_id": ECG_SWEEP_PLOT_ID, "op": "clear"},
+                {"plot_id": previous_plot_id, "op": "clear"},
             )
         state.update(
-            {"chart": chart, "stream": stream_key, "tpl": template, "sent_total": 0}
+            {
+                "chart": chart,
+                "stream": stream_key,
+                "tpl": template,
+                "sent_total": 0,
+                "plot_id": next_plot_id,
+            }
         )
         return
 
@@ -60,19 +78,31 @@ def update_ecg_sweep(
             send_custom_message(
                 session,
                 ECG_SWEEP_MESSAGE,
-                {"plot_id": ECG_SWEEP_PLOT_ID, "op": "clear"},
+                {"plot_id": previous_plot_id, "op": "clear"},
             )
         state.update(
-            {"chart": chart, "stream": stream_key, "tpl": template, "sent_total": 0}
+            {
+                "chart": chart,
+                "stream": stream_key,
+                "tpl": template,
+                "sent_total": 0,
+                "plot_id": next_plot_id,
+            }
         )
         return
 
     if force_reset:
+        if state["chart"] == "ecg" and previous_plot_id != next_plot_id:
+            send_custom_message(
+                session,
+                ECG_SWEEP_MESSAGE,
+                {"plot_id": previous_plot_id, "op": "clear"},
+            )
         send_custom_message(
             session,
             ECG_SWEEP_MESSAGE,
             build_ecg_sweep_message(
-                ECG_SWEEP_PLOT_ID,
+                next_plot_id,
                 op="reset",
                 samples=list(ecg_samples),
                 sample_rate_hz=sample_rate_hz,
@@ -86,6 +116,7 @@ def update_ecg_sweep(
                 "stream": stream_key,
                 "tpl": template,
                 "sent_total": total_samples,
+                "plot_id": next_plot_id,
             }
         )
         return
@@ -115,7 +146,7 @@ def update_ecg_sweep(
             session,
             ECG_SWEEP_MESSAGE,
             build_ecg_sweep_message(
-                ECG_SWEEP_PLOT_ID,
+                next_plot_id,
                 op="append",
                 samples=chunk_samples,
                 sample_rate_hz=int(chunk.get("sample_rate_hz", sample_rate_hz) or sample_rate_hz),
@@ -131,5 +162,6 @@ def update_ecg_sweep(
             "stream": stream_key,
             "tpl": template,
             "sent_total": sent_total,
+            "plot_id": next_plot_id,
         }
     )

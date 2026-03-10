@@ -277,14 +277,21 @@ def _load_render_module(monkeypatch, filename: str, config_attrs: dict):
     ):
         if session is None:
             return
+        plot_id = ecg_sweep_plot_id(stream_key)
         if chart != "ecg" or stream_key is None:
             if state["chart"] == "ecg":
                 session.send_custom_message(
                     "ecg-sweep",
-                    {"plot_id": "h10_ecg_sweep", "op": "clear"},
+                    {"plot_id": state.get("plot_id") or plot_id, "op": "clear"},
                 )
             state.update(
-                {"chart": chart, "stream": stream_key, "tpl": template, "sent_total": 0}
+                {
+                    "chart": chart,
+                    "stream": stream_key,
+                    "tpl": template,
+                    "sent_total": 0,
+                    "plot_id": plot_id,
+                }
             )
             return
 
@@ -299,7 +306,7 @@ def _load_render_module(monkeypatch, filename: str, config_attrs: dict):
             session.send_custom_message(
                 "ecg-sweep",
                 build_ecg_sweep_message(
-                    "h10_ecg_sweep",
+                    plot_id,
                     op="reset",
                     samples=list(ecg_samples),
                     sample_rate_hz=int(ecg_meta.get("sample_rate_hz", 130) or 130),
@@ -313,6 +320,7 @@ def _load_render_module(monkeypatch, filename: str, config_attrs: dict):
                     "stream": stream_key,
                     "tpl": template,
                     "sent_total": total_samples,
+                    "plot_id": plot_id,
                 }
             )
             return
@@ -324,7 +332,7 @@ def _load_render_module(monkeypatch, filename: str, config_attrs: dict):
             session.send_custom_message(
                 "ecg-sweep",
                 build_ecg_sweep_message(
-                    "h10_ecg_sweep",
+                    plot_id,
                     op="append",
                     samples=list(chunk.get("samples_uv", [])),
                     sample_rate_hz=int(chunk.get("sample_rate_hz", 130) or 130),
@@ -340,14 +348,22 @@ def _load_render_module(monkeypatch, filename: str, config_attrs: dict):
                 "stream": stream_key,
                 "tpl": template,
                 "sent_total": sent_total,
+                "plot_id": plot_id,
             }
         )
+
+    def ecg_sweep_plot_id(stream_key):
+        if not stream_key:
+            return "h10_ecg_sweep"
+        safe = "".join(char if char.isalnum() else "_" for char in str(stream_key)).strip("_")
+        return f"h10_ecg_sweep_{safe}" if safe else "h10_ecg_sweep"
 
     fake_ecg_sweep.ECG_SWEEP_MESSAGE = "ecg-sweep"
     fake_ecg_sweep.build_ecg_sweep_message = build_ecg_sweep_message
     fake_h10_motion.motion_plane_svg = motion_plane_svg
     fake_h10_motion.motion_detail_row_svg = motion_detail_row_svg
     fake_h10_ecg_bridge.ECG_SWEEP_PLOT_ID = "h10_ecg_sweep"
+    fake_h10_ecg_bridge.ecg_sweep_plot_id = ecg_sweep_plot_id
     fake_h10_ecg_bridge.update_ecg_sweep = update_ecg_sweep
 
     monkeypatch.setitem(sys.modules, "shiny", fake_shiny)
@@ -934,12 +950,12 @@ def test_h10_ecg_chart_streams_sweep_messages(monkeypatch) -> None:
     registry.effects["_update_h10_ecg_sweep"]()
 
     assert detail["tag"] == "div"
-    assert detail["kwargs"]["id"] == "h10_ecg_sweep"
+    assert detail["kwargs"]["id"] == "h10_ecg_sweep_11"
     assert session.messages == [
         (
             "ecg-sweep",
             {
-                "plot_id": "h10_ecg_sweep",
+                "plot_id": "h10_ecg_sweep_11",
                 "op": "reset",
                 "samples": [10, 20, 30, 40, 50, 60],
                 "sample_rate_hz": 130,
@@ -965,7 +981,7 @@ def test_h10_ecg_chart_streams_sweep_messages(monkeypatch) -> None:
         (
             "ecg-sweep",
             {
-                "plot_id": "h10_ecg_sweep",
+                "plot_id": "h10_ecg_sweep_11",
                 "op": "append",
                 "samples": [70, 80],
                 "sample_rate_hz": 130,

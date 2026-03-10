@@ -7,7 +7,7 @@ from shiny import reactive, render, ui
 from shinywidgets import output_widget, render_widget
 
 from app.config import H10_CHARTS, H10_DEFAULTS, H10_DEVICE_OPTIONS, H10_DEVICES
-from app.renders.h10_ecg_bridge import ECG_SWEEP_PLOT_ID, update_ecg_sweep
+from app.renders.h10_ecg_bridge import ecg_sweep_plot_id, update_ecg_sweep
 from app.renders.h10_motion import motion_detail_row_svg, motion_plane_svg
 from app.renders.render_utils import (
     metric_value,
@@ -156,6 +156,7 @@ def register_h10_renders(
         "stream": None,
         "tpl": None,
         "sent_total": 0,
+        "plot_id": None,
     }
 
     @render.ui
@@ -287,7 +288,12 @@ def register_h10_renders(
             frame = h10_motion_latest[stream_key]()
             return ui.HTML(motion_detail_row_svg(frame.get("trail_points", [])))
         if input.h10_chart() == "ecg":
-            return ui.div(id=ECG_SWEEP_PLOT_ID, style="width:100%; height:400px;")
+            if stream_key is None:
+                return ui.HTML("")
+            return ui.div(
+                id=ecg_sweep_plot_id(stream_key),
+                style="width:100%; height:400px;",
+            )
         return output_widget("h10_graph")
 
     @reactive.Effect
