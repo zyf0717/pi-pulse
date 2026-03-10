@@ -164,6 +164,11 @@ def _load_render_module(monkeypatch, filename: str, config_attrs: dict):
             "args": args,
             "kwargs": kwargs,
         },
+        span=lambda *args, **kwargs: {
+            "tag": "span",
+            "args": args,
+            "kwargs": kwargs,
+        },
         input_select=lambda *args, **kwargs: {
             "tag": "input_select",
             "args": args,
@@ -196,6 +201,32 @@ def _load_render_module(monkeypatch, filename: str, config_attrs: dict):
     fake_config = ModuleType("app.config")
     for key, value in config_attrs.items():
         setattr(fake_config, key, value)
+    if not hasattr(fake_config, "pulse_metric"):
+        def pulse_metric(device_id, metric_key):
+            default_metric = {
+                "field": metric_key,
+                "label": metric_key.replace("_", " ").title(),
+                "unit": None,
+            }
+            if metric_key == "temp":
+                default_metric = {
+                    "field": "temp",
+                    "label": "Temperature",
+                    "unit": "°C",
+                }
+            device_metrics = getattr(fake_config, "DEVICES", {}).get(device_id, {}).get("pulse_metrics", {})
+            metric = device_metrics.get(metric_key) if isinstance(device_metrics, dict) else None
+            if not isinstance(metric, dict):
+                return dict(default_metric)
+            return {
+                "field": str(metric.get("field") or default_metric["field"]),
+                "label": str(metric.get("label") or default_metric["label"]),
+                "unit": metric.get("unit")
+                if metric.get("unit") is None
+                else str(metric.get("unit")),
+            }
+
+        fake_config.pulse_metric = pulse_metric
 
     fake_sparkline = ModuleType("app.sparkline")
     fake_ecg_sweep = ModuleType("app.renders.ecg_sweep")
@@ -206,20 +237,45 @@ def _load_render_module(monkeypatch, filename: str, config_attrs: dict):
         rendered = [fmt(value) for value in values] if fmt else list(values)
         return f"SPARK:{rendered}"
 
+    def blank_sparkline():
+        return "BLANK_SPARK"
+
+    def blank_sparkline_markup():
+        return "BLANK_SPARK"
+
     fake_sparkline.sparkline = sparkline
+    fake_sparkline.blank_sparkline = blank_sparkline
+    fake_sparkline.blank_sparkline_markup = blank_sparkline_markup
 
     fake_render_utils = ModuleType("app.renders.render_utils")
 
     def metric_value(device, devices, latest, field, formatter):
         if device not in devices:
             return "N/A"
-        return formatter(latest[device]().get(field, 0.0))
+        raw_value = latest[device]().get(field)
+        value = raw_value
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            if isinstance(raw_value, str) and raw_value.strip():
+                return raw_value
+            return "N/A"
+        try:
+            return formatter(float(value))
+        except Exception:
+            if isinstance(raw_value, str) and raw_value.strip():
+                return raw_value
+            return "N/A"
 
     def sparkline_values(device, devices, latest, history, field, *, scale=1.0):
         if device not in devices:
             return None
         latest[device]()
-        return [data.get(field, 0.0) * scale for _, data in history[device]]
+        values = []
+        for _, data in history[device]:
+            value = data.get(field, 0.0)
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                continue
+            values.append(float(value) * scale)
+        return values or None
 
     def reset_chart_state(state):
         state.update({"chart": None, "dev": None, "tpl": None})
@@ -464,11 +520,11 @@ def test_sen66_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> No
     assert registry.text["sen66_co2_val"]() == "N/A"
     assert registry.text["sen66_voc_val"]() == "N/A"
     assert registry.text["sen66_nox_val"]() == "N/A"
-    assert registry.ui["sen66_temp_spark"]() == ""
-    assert registry.ui["sen66_hum_spark"]() == ""
-    assert registry.ui["sen66_co2_spark"]() == ""
-    assert registry.ui["sen66_voc_spark"]() == ""
-    assert registry.ui["sen66_nox_spark"]() == ""
+    assert registry.ui["sen66_temp_spark"]() == "BLANK_SPARK"
+    assert registry.ui["sen66_hum_spark"]() == "BLANK_SPARK"
+    assert registry.ui["sen66_co2_spark"]() == "BLANK_SPARK"
+    assert registry.ui["sen66_voc_spark"]() == "BLANK_SPARK"
+    assert registry.ui["sen66_nox_spark"]() == "BLANK_SPARK"
 
 
 def test_gps_value_boxes_format_current_snapshot(monkeypatch) -> None:
@@ -539,11 +595,11 @@ def test_gps_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> None
     assert registry.text["gps_altitude_val"]() == "N/A"
     assert registry.text["gps_speed_val"]() == "N/A"
     assert registry.ui["gps_timestamp_val"]() == "N/A"
-    assert registry.ui["gps_lat_spark"]() == ""
-    assert registry.ui["gps_lon_spark"]() == ""
-    assert registry.ui["gps_accuracy_spark"]() == ""
-    assert registry.ui["gps_altitude_spark"]() == ""
-    assert registry.ui["gps_speed_spark"]() == ""
+    assert registry.ui["gps_lat_spark"]() == "BLANK_SPARK"
+    assert registry.ui["gps_lon_spark"]() == "BLANK_SPARK"
+    assert registry.ui["gps_accuracy_spark"]() == "BLANK_SPARK"
+    assert registry.ui["gps_altitude_spark"]() == "BLANK_SPARK"
+    assert registry.ui["gps_speed_spark"]() == "BLANK_SPARK"
 
 
 def test_h10_value_boxes_format_current_snapshot(monkeypatch) -> None:
@@ -765,11 +821,56 @@ def test_h10_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> None
     assert registry.text["h10_rr_last_val"]() == "N/A"
     assert registry.text["h10_ecg_val"]() == "N/A"
     assert registry.text["h10_acc_val"]() == "N/A"
-    assert registry.ui["h10_bpm_spark"]() == ""
-    assert registry.ui["h10_rr_last_spark"]() == ""
-    assert registry.ui["h10_ecg_spark"]() == ""
-    assert registry.ui["h10_acc_spark"]() == ""
-    assert registry.ui["h10_motion_preview"]() == ""
+    assert registry.ui["h10_bpm_spark"]() == "BLANK_SPARK"
+    assert registry.ui["h10_rr_last_spark"]() == "BLANK_SPARK"
+    assert registry.ui["h10_ecg_spark"]() == "BLANK_SPARK"
+    assert registry.ui["h10_acc_spark"]() == "BLANK_SPARK"
+    assert "N/A" in registry.ui["h10_motion_preview"]()
+    assert "BLANK_SPARK" in registry.ui["h10_motion_preview"]()
+
+
+def test_h10_motion_preview_returns_na_without_acceleration_data(monkeypatch) -> None:
+    module, registry = _load_render_module(
+        monkeypatch,
+        "h10.py",
+        {
+            "H10_DEVICES": {
+                "11": {
+                    "label": "11 (192.168.121.11)",
+                    "default": "http://h10-11",
+                    "ecg": "http://h10-11/ecg",
+                    "acc": "http://h10-11/acc",
+                }
+            },
+            "H10_CHARTS": {
+                "bpm": "Heart Rate (BPM)",
+                "rr": "Last RR Interval (ms)",
+                "ecg": "ECG (µV)",
+                "acc_dyn": "Mean Dynamic Acceleration",
+                "motion": "Acceleration Axes",
+            },
+        },
+    )
+    session = _FakeSession()
+    module.register_h10_renders(
+        _FakeInput(device="11", h10_chart="motion"),
+        {"11": _FakeValue({"heart_rate_bpm": 72.0, "rr_last_ms": 840.0})},
+        {"11": deque()},
+        {"11": _FakeValue({"samples_uv": [], "sample_rate_hz": 130})},
+        {"11": deque()},
+        {"11": deque()},
+        {"11": _FakeValue({})},
+        {"11": deque()},
+        {"11": _FakeValue({"trail_points": []})},
+        lambda: "plotly_dark",
+        _FakeFigureWidget(),
+        {"chart": None, "dev": None, "tpl": None},
+        session,
+    )
+
+    assert "N/A" in registry.ui["h10_motion_preview"]()
+    assert "BLANK_SPARK" in registry.ui["h10_motion_preview"]()
+    assert registry.ui["h10_detail_view"]() == "N/A"
 
 
 def test_pulse_invalid_device_clears_chart_and_resets_state(monkeypatch) -> None:
@@ -806,6 +907,111 @@ def test_pulse_invalid_device_clears_chart_and_resets_state(monkeypatch) -> None
 
     assert widget.data == []
     assert state == {"chart": None, "dev": None, "tpl": None}
+
+
+def test_pixel7_pulse_uses_thermal_headroom_for_temp_card_and_chart(monkeypatch) -> None:
+    module, registry = _load_render_module(
+        monkeypatch,
+        "pulse.py",
+        {
+            "DEVICES": {
+                "pixel-7": {
+                    "label": "Pixel 7",
+                    "default": "http://pulse-pixel-7",
+                    "pulse_metrics": {
+                        "temp": {
+                            "field": "thermal_headroom",
+                            "label": "Thermal Headroom",
+                            "unit": None,
+                        }
+                    },
+                }
+            },
+            "PULSE_CHARTS": {
+                "cpu": "CPU Usage (%)",
+                "cpu_freq": "CPU Frequency (MHz)",
+                "mem": "Memory Usage (%)",
+                "temp": "Temperature (°C)",
+                "net": "Download & Upload (KB/s)",
+            },
+        },
+    )
+    widget = _FakeFigureWidget()
+    state = {"chart": None, "dev": None, "tpl": None}
+
+    module.register_pulse_renders(
+        _FakeInput(device="pixel-7", pulse_chart="temp"),
+        {
+            "pixel-7": _FakeValue(
+                {
+                    "temp": 99.0,
+                    "thermal_headroom": 0.7,
+                }
+            )
+        },
+        {
+            "pixel-7": deque(
+                [
+                    ("t1", {"temp": 98.0, "thermal_headroom": 0.5}),
+                    ("t2", {"temp": 99.0, "thermal_headroom": 0.7}),
+                ]
+            )
+        },
+        lambda: "plotly_dark",
+        widget,
+        state,
+    )
+
+    assert registry.ui["pulse_temp_header"]()["tag"] == "span"
+    assert registry.ui["pulse_temp_header"]()["args"][0] == "Thermal Headroom"
+    assert registry.text["temp_val"]() == "0.7"
+    assert registry.ui["temp_spark"]() == "SPARK:['0.5', '0.7']"
+
+    registry.effects["_update_pulse_chart"]()
+
+    assert len(widget.data) == 1
+    assert widget.data[0].y == [0.5, 0.7]
+    assert widget.data[0].name == "Thermal Headroom"
+    assert widget.layout.yaxis.title == "Thermal Headroom"
+
+
+def test_pulse_card_displays_string_payload_without_using_it_in_sparkline(monkeypatch) -> None:
+    module, registry = _load_render_module(
+        monkeypatch,
+        "pulse.py",
+        {
+            "DEVICES": {
+                "10": {"label": "10 (192.168.121.10)", "default": "http://pulse-10"}
+            },
+            "PULSE_CHARTS": {
+                "cpu": "CPU Usage (%)",
+                "cpu_freq": "CPU Frequency (MHz)",
+                "mem": "Memory Usage (%)",
+                "temp": "Temperature (°C)",
+                "net": "Download & Upload (KB/s)",
+            },
+        },
+    )
+
+    module.register_pulse_renders(
+        _FakeInput(device="10", pulse_chart="temp"),
+        {"10": _FakeValue({"temp": "N/A"})},
+        {
+            "10": deque(
+                [
+                    ("t1", {"temp": 21.0}),
+                    ("t2", {"temp": "N/A"}),
+                    ("t3", {"temp": 22.0}),
+                ]
+            )
+        },
+        lambda: "plotly_dark",
+        _FakeFigureWidget(),
+        {"chart": None, "dev": None, "tpl": None},
+    )
+
+    assert registry.text["temp_val"]() == "N/A"
+    assert registry.ui["temp_spark"]() == "SPARK:['21.0°C', '22.0°C']"
 
 
 def test_sen66_invalid_device_clears_chart_sets_annotation_and_resets_state(

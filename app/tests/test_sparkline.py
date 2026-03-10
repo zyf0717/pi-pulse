@@ -23,12 +23,14 @@ def _load_sparkline_module(monkeypatch):
     return module
 
 
-def test_sparkline_returns_empty_string_for_short_series(monkeypatch) -> None:
+def test_sparkline_returns_blank_placeholder_for_short_series(monkeypatch) -> None:
     sparkline_module = _load_sparkline_module(monkeypatch)
 
     html = sparkline_module.sparkline([1.0])
 
-    assert html == ""
+    assert "<svg" in html
+    assert "visibility:hidden" in html
+    assert "<polyline" not in html
 
 
 def test_sparkline_renders_single_stat_for_flat_series(monkeypatch) -> None:
@@ -50,3 +52,13 @@ def test_sparkline_renders_min_max_with_custom_formatter(monkeypatch) -> None:
 
     assert "<div>[3.5]</div><div>[1.0]</div>" in html
     assert 'stroke="#64b5f6"' in html
+
+
+def test_blank_sparkline_markup_matches_standard_dimensions(monkeypatch) -> None:
+    sparkline_module = _load_sparkline_module(monkeypatch)
+
+    html = sparkline_module.blank_sparkline_markup()
+
+    assert 'height="34"' in html
+    assert 'viewBox="0 0 120 34"' in html
+    assert "visibility:hidden" in html

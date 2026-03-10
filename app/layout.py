@@ -138,16 +138,19 @@ def _sensor_tooltip(label: str, tooltip_id: str, *lines):
 
 
 def _pulse_cards():
-    return [
-        _metric_card(
-            title,
-            value_output_id,
-            spark_output_id,
-            chart_target="pulse_chart",
-            chart_value=chart_value,
+    cards = []
+    for title, value_output_id, spark_output_id, chart_value in _PULSE_CARD_SPECS:
+        header = ui.output_ui("pulse_temp_header") if chart_value == "temp" else title
+        cards.append(
+            _metric_card(
+                header,
+                value_output_id,
+                spark_output_id,
+                chart_target="pulse_chart",
+                chart_value=chart_value,
+            )
         )
-        for title, value_output_id, spark_output_id, chart_value in _PULSE_CARD_SPECS
-    ]
+    return cards
 
 
 def _sen66_cards():

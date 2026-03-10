@@ -3,6 +3,12 @@
 from collections.abc import Mapping
 
 
+def _numeric_value(value: object) -> float | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return None
+
+
 def metric_value(
     device: str,
     devices: Mapping[str, object],
@@ -12,7 +18,18 @@ def metric_value(
 ) -> str:
     if device not in devices:
         return "N/A"
-    return formatter(latest[device]().get(field, 0.0))
+    raw_value = latest[device]().get(field)
+    value = _numeric_value(raw_value)
+    if value is None:
+        if isinstance(raw_value, str) and raw_value.strip():
+            return raw_value
+        return "N/A"
+    try:
+        return formatter(value)
+    except Exception:
+        if isinstance(raw_value, str) and raw_value.strip():
+            return raw_value
+        return "N/A"
 
 
 def sparkline_values(
@@ -27,7 +44,13 @@ def sparkline_values(
     if device not in devices:
         return None
     latest[device]()  # establish reactive dependency
-    return [data.get(field, 0.0) * scale for _, data in history[device]]
+    values = []
+    for _, data in history[device]:
+        value = _numeric_value(data.get(field, 0.0))
+        if value is None:
+            continue
+        values.append(value * scale)
+    return values or None
 
 
 def reset_chart_state(state: dict) -> None:

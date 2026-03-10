@@ -12,6 +12,9 @@ from shared.streams import DEFAULT_STREAM, stream_path
 _CONFIG_PATH = Path(__file__).parent / "config.yaml"
 _DEFAULT_RELAY_BASE_URL = "http://127.0.0.1:8010"
 _IP_PREFIX = "192.168.121."
+PULSE_DEFAULT_METRICS = {
+    "temp": {"field": "temp", "label": "Temperature", "unit": "°C"}
+}
 
 
 def load_raw_config(config_path: Path = _CONFIG_PATH) -> dict:
@@ -36,6 +39,44 @@ def _relay_url(base_url: str, path: str) -> str:
     return f"{base_url.rstrip('/')}{path}"
 
 
+def _copy_metric_defaults(
+    defaults: Mapping[str, Mapping[str, str | None]],
+) -> dict[str, dict[str, str | None]]:
+    return {key: dict(spec) for key, spec in defaults.items()}
+
+
+def _normalize_metric_specs(
+    value: object,
+    defaults: Mapping[str, Mapping[str, str | None]],
+) -> dict[str, dict[str, str | None]]:
+    metrics = _copy_metric_defaults(defaults)
+    if not isinstance(value, Mapping):
+        return metrics
+
+    raw_metrics = value.get("metrics")
+    if not isinstance(raw_metrics, Mapping):
+        return metrics
+
+    for metric_key, defaults in metrics.items():
+        raw_override = raw_metrics.get(metric_key)
+        if not isinstance(raw_override, Mapping):
+            continue
+        field = raw_override.get("field")
+        label = raw_override.get("label")
+        if field:
+            defaults["field"] = str(field)
+        if label:
+            defaults["label"] = str(label)
+        if "unit" in raw_override:
+            unit = raw_override["unit"]
+            defaults["unit"] = None if unit is None else str(unit)
+    return metrics
+
+
+def _pulse_metrics(value: object) -> dict[str, dict[str, str | None]]:
+    return _normalize_metric_specs(value, PULSE_DEFAULT_METRICS)
+
+
 def build_settings(raw_config: Mapping) -> dict:
     relay_base_url = str(
         raw_config.get("relay_base_url") or _DEFAULT_RELAY_BASE_URL
@@ -57,12 +98,14 @@ def build_settings(raw_config: Mapping) -> dict:
         all_devices[device_id] = label
 
         if "pulse" in value:
+            pulse_value = value.get("pulse")
             devices[device_id] = {
                 "label": label,
                 DEFAULT_STREAM: _relay_url(
                     relay_base_url,
                     stream_path("pulse", device_id),
                 ),
+                "pulse_metrics": _pulse_metrics(pulse_value),
             }
 
         if "sen66" in value:
@@ -128,6 +171,26 @@ def build_settings(raw_config: Mapping) -> dict:
         "h10_defaults": h10_defaults,
         "all_devices": all_devices,
         "all_devices_default": all_devices_default,
+    }
+
+
+def pulse_metric(device_id: str, metric_key: str) -> dict[str, str | None]:
+    default_metric = PULSE_DEFAULT_METRICS.get(
+        metric_key,
+        {"field": metric_key, "label": metric_key.replace("_", " ").title(), "unit": None},
+    )
+    device_metrics = DEVICES.get(device_id, {}).get("pulse_metrics")
+    if not isinstance(device_metrics, Mapping):
+        return dict(default_metric)
+    metric = device_metrics.get(metric_key)
+    if not isinstance(metric, Mapping):
+        return dict(default_metric)
+    return {
+        "field": str(metric.get("field") or default_metric["field"]),
+        "label": str(metric.get("label") or default_metric["label"]),
+        "unit": metric.get("unit")
+        if metric.get("unit") is None
+        else str(metric.get("unit")),
     }
 
 

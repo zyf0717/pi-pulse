@@ -15,6 +15,44 @@ def _default_fmt(v: float) -> str:
     return f"{v:.0f}" if v == int(v) else f"{v:.1f}"
 
 
+def _sparkline_wrapper(svg: str, stats: str) -> ui.HTML:
+    return ui.HTML(_sparkline_wrapper_html(svg, stats))
+
+
+def _sparkline_wrapper_html(svg: str, stats: str) -> str:
+    wrapper = (
+        f'<div style="display:flex;align-items:stretch;'
+        f'padding:0 0.75rem 0.5rem;gap:6px">'
+        f"{svg}{stats}</div>"
+    )
+    return wrapper
+
+
+def blank_sparkline_markup(*, height: int = _HEIGHT) -> str:
+    svg = (
+        f'<svg width="100%" height="{height}" '
+        f'viewBox="0 0 {_VBOX_W} {height}" '
+        f'preserveAspectRatio="none" '
+        f'xmlns="http://www.w3.org/2000/svg" '
+        f'style="display:block;flex:1 1 0;min-width:0"></svg>'
+    )
+    stats = (
+        f'<div style="'
+        f"display:flex;flex-direction:column;justify-content:space-between;"
+        f"height:{height}px;"
+        f"font-size:0.7rem;line-height:1;text-align:right;"
+        f"color:{_LABEL_COLOR};white-space:nowrap;flex-shrink:0;"
+        f'font-variant-numeric:tabular-nums;visibility:hidden">'
+        f"<div>0</div><div>0</div>"
+        f"</div>"
+    )
+    return _sparkline_wrapper_html(svg, stats)
+
+
+def blank_sparkline(*, height: int = _HEIGHT) -> ui.HTML:
+    return ui.HTML(blank_sparkline_markup(height=height))
+
+
 def sparkline(
     values: list[float],
     *,
@@ -25,7 +63,7 @@ def sparkline(
 ) -> ui.HTML:
     """Return a full-width SVG sparkline with stacked max/min on the right."""
     if len(values) < 2:
-        return ui.HTML("")
+        return blank_sparkline(height=height)
 
     lo, hi = min(values), max(values)
     span = hi - lo or 1.0
@@ -64,9 +102,4 @@ def sparkline(
         f"{stats_inner}"
         f"</div>"
     )
-    wrapper = (
-        f'<div style="display:flex;align-items:stretch;'
-        f'padding:0 0.75rem 0.5rem;gap:6px">'
-        f"{svg}{stats}</div>"
-    )
-    return ui.HTML(wrapper)
+    return _sparkline_wrapper(svg, stats)

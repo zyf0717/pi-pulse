@@ -13,7 +13,7 @@ from app.renders.render_utils import (
     reset_chart_state,
     sparkline_values,
 )
-from app.sparkline import sparkline
+from app.sparkline import blank_sparkline, sparkline
 
 _NO_DATA_ANNOTATION = dict(
     text="No SEN66 data is available for this device.",
@@ -58,7 +58,7 @@ def _sen66_spark(
 ):
     values = sparkline_values(device, SEN66_DEVICES, sen66_latest, sen66_history, field)
     if values is None:
-        return ui.HTML("")
+        return blank_sparkline()
     return sparkline(values, fmt=fmt) if fmt else sparkline(values)
 
 

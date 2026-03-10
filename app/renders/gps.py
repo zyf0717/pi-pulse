@@ -7,7 +7,7 @@ from shiny import reactive, render, ui
 
 from app.config import GPS_DEVICES
 from app.renders.render_utils import metric_value, sparkline_values
-from app.sparkline import sparkline
+from app.sparkline import blank_sparkline, sparkline
 
 _GMT_PLUS_8 = timezone(timedelta(hours=8))
 
@@ -22,7 +22,7 @@ def _gps_spark(
 ):
     values = sparkline_values(device, GPS_DEVICES, gps_latest, gps_history, field)
     if values is None:
-        return ui.HTML("")
+        return blank_sparkline()
     return sparkline(values, fmt=fmt) if fmt else sparkline(values)
 
 

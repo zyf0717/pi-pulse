@@ -182,6 +182,14 @@ def _mean_xyz_mg(samples_mg: list[dict]) -> tuple[float, float, float]:
     )
 
 
+def _reactive_values(keys) -> dict[str, reactive.Value]:
+    return {key: reactive.Value({}) for key in keys}
+
+
+def _history_map(keys, *, maxlen: int) -> dict[str, deque]:
+    return {key: deque(maxlen=maxlen) for key in keys}
+
+
 @dataclass
 class IngestState:
     pulse_latest: dict[str, reactive.Value]
@@ -212,87 +220,31 @@ class IngestState:
 
 
 def build_ingest_state() -> IngestState:
-    pulse_default = {
-        "cpu": 0.0,
-        "mem": 0.0,
-        "temp": 0.0,
-        "cpu_freq_avg_mhz": 0.0,
-        "net_rx_bps_total": 0,
-        "net_tx_bps_total": 0,
-    }
-    sen66_default = {
-        "temperature_c": 0.0,
-        "humidity_rh": 0.0,
-        "co2_ppm": 0,
-        "voc_index": 0.0,
-        "nox_index": 0.0,
-        "pm1_0_ugm3": 0.0,
-        "pm2_5_ugm3": 0.0,
-        "pm4_0_ugm3": 0.0,
-        "pm10_0_ugm3": 0.0,
-    }
-    sen66_nc_default = {
-        "nc_pm0_5_pcm3": 0.0,
-        "nc_pm1_0_pcm3": 0.0,
-        "nc_pm2_5_pcm3": 0.0,
-        "nc_pm4_0_pcm3": 0.0,
-        "nc_pm10_0_pcm3": 0.0,
-    }
-    gps_default = {
-        "latitude": 0.0,
-        "longitude": 0.0,
-        "accuracy": 0.0,
-        "altitude": 0.0,
-        "speed": 0.0,
-        "timestamp": "",
-    }
-    h10_default = {
-        "heart_rate_bpm": 0.0,
-        "rr_avg_ms": 0.0,
-        "rr_last_ms": 0.0,
-        "rr_count": 0,
-        "rr_intervals_ms": [],
-    }
-    h10_ecg_default = {
-        "sample_rate_hz": 130,
-        "total_samples": 0,
-    }
-    h10_acc_default = {
-        "mean_dynamic_accel_mg": 0.0,
-        "sample_rate_hz": 200,
-    }
-    h10_motion_default = {"trail_points": []}
     h10_ecg_display_samples = 1300
     motion_trail_len = max(6, int(round(30 * H10_ACC_DYNAMIC_WINDOW_S)))
 
     return IngestState(
-        pulse_latest={k: reactive.Value(dict(pulse_default)) for k in DEVICES},
-        pulse_temp_history={k: deque(maxlen=60) for k in DEVICES},
-        sen66_latest={k: reactive.Value(dict(sen66_default)) for k in SEN66_DEVICES},
-        sen66_nc_latest={
-            k: reactive.Value(dict(sen66_nc_default)) for k in SEN66_DEVICES
-        },
-        sen66_history={k: deque(maxlen=60) for k in SEN66_DEVICES},
-        sen66_nc_history={k: deque(maxlen=60) for k in SEN66_DEVICES},
-        gps_latest={k: reactive.Value(dict(gps_default)) for k in GPS_DEVICES},
-        gps_history={k: deque(maxlen=60) for k in GPS_DEVICES},
-        h10_latest={k: reactive.Value(dict(h10_default)) for k in H10_DEVICES},
-        h10_history={k: deque(maxlen=60) for k in H10_DEVICES},
-        h10_ecg_latest={
-            k: reactive.Value(dict(h10_ecg_default)) for k in H10_DEVICES
-        },
+        pulse_latest=_reactive_values(DEVICES),
+        pulse_temp_history=_history_map(DEVICES, maxlen=60),
+        sen66_latest=_reactive_values(SEN66_DEVICES),
+        sen66_nc_latest=_reactive_values(SEN66_DEVICES),
+        sen66_history=_history_map(SEN66_DEVICES, maxlen=60),
+        sen66_nc_history=_history_map(SEN66_DEVICES, maxlen=60),
+        gps_latest=_reactive_values(GPS_DEVICES),
+        gps_history=_history_map(GPS_DEVICES, maxlen=60),
+        h10_latest=_reactive_values(H10_DEVICES),
+        h10_history=_history_map(H10_DEVICES, maxlen=60),
+        h10_ecg_latest=_reactive_values(H10_DEVICES),
         h10_ecg_samples={
             k: deque(maxlen=h10_ecg_display_samples) for k in H10_DEVICES
         },
         h10_ecg_chunks={k: deque(maxlen=64) for k in H10_DEVICES},
         h10_ecg_total_samples={k: 0 for k in H10_DEVICES},
-        h10_acc_latest={k: reactive.Value(dict(h10_acc_default)) for k in H10_DEVICES},
-        h10_acc_history={k: deque(maxlen=60) for k in H10_DEVICES},
+        h10_acc_latest=_reactive_values(H10_DEVICES),
+        h10_acc_history=_history_map(H10_DEVICES, maxlen=60),
         h10_acc_pending={k: deque() for k in H10_DEVICES},
         h10_acc_sample_rate={k: 200 for k in H10_DEVICES},
-        h10_motion_latest={
-            k: reactive.Value(dict(h10_motion_default)) for k in H10_DEVICES
-        },
+        h10_motion_latest=_reactive_values(H10_DEVICES),
         h10_motion_trail={k: deque(maxlen=motion_trail_len) for k in H10_DEVICES},
         h10_motion_gravity={k: (0.0, 0.0, 1000.0) for k in H10_DEVICES},
         h10_motion_last_time={k: None for k in H10_DEVICES},

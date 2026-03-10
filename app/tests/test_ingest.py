@@ -177,6 +177,21 @@ def test_dead_consumer_invalidates_task_set_and_next_ensure_restarts(monkeypatch
     assert len(calls["create_task"]) == 14
 
 
+def test_build_ingest_state_initial_latest_values_are_empty(monkeypatch) -> None:
+    ingest_module, _ = _load_ingest_module(monkeypatch)
+
+    state = ingest_module.build_ingest_state()
+
+    assert state.pulse_latest["10"]() == {}
+    assert state.sen66_latest["11"]() == {}
+    assert state.sen66_nc_latest["11"]() == {}
+    assert state.gps_latest["pixel-7"]() == {}
+    assert state.h10_latest["11:6FFF5628"]() == {}
+    assert state.h10_ecg_latest["11:6FFF5628"]() == {}
+    assert state.h10_acc_latest["11:6FFF5628"]() == {}
+    assert state.h10_motion_latest["11:6FFF5628"]() == {}
+
+
 def test_normalize_h10_sample_handles_common_ble_field_names(monkeypatch) -> None:
     ingest_module, _ = _load_ingest_module(monkeypatch)
 

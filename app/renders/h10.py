@@ -15,7 +15,7 @@ from app.renders.render_utils import (
     reset_chart_state,
     sparkline_values,
 )
-from app.sparkline import sparkline
+from app.sparkline import blank_sparkline, blank_sparkline_markup, sparkline
 
 _NO_DATA_ANNOTATION = dict(
     text="No H10 data is available for this device.",
@@ -43,11 +43,18 @@ def _h10_spark(
     fmt=None,
 ):
     if stream_key is None:
-        return ui.HTML("")
+        return blank_sparkline()
     values = sparkline_values(stream_key, H10_DEVICES, latest_map, history_map, field)
     if values is None:
-        return ui.HTML("")
+        return blank_sparkline()
     return sparkline(values, fmt=fmt) if fmt else sparkline(values)
+
+
+def _na_card_placeholder() -> ui.HTML:
+    return ui.HTML(
+        '<div style="font-size:1.75rem;font-weight:700;padding:0.5rem 0.75rem;">N/A</div>'
+        + blank_sparkline_markup()
+    )
 
 
 def _selected_h10_stream(input) -> str | None:
@@ -67,6 +74,19 @@ def _selected_h10_stream(input) -> str | None:
         return selected
 
     return H10_DEFAULTS.get(node_key) or next(iter(options), None)
+
+
+def _motion_trail_points(
+    stream_key: str | None,
+    h10_motion_latest: dict[str, reactive.Value],
+) -> list[tuple[float, ...]] | None:
+    if stream_key is None:
+        return None
+    frame = h10_motion_latest[stream_key]()
+    trail_points = frame.get("trail_points", [])
+    if not trail_points:
+        return None
+    return trail_points
 
 
 def _reset_h10_chart(h10_widget: go.FigureWidget, h10_state: dict) -> None:
@@ -122,17 +142,6 @@ def _update_h10_chart_data(
     field = _H10_FIELDS[chart]
     h10_widget.data[0].x = times
     h10_widget.data[0].y = [row.get(field, 0.0) for row in data_rows]
-
-
-def _send_custom_message(session, name: str, payload: dict) -> None:
-    if session is None:
-        return
-    sender = getattr(session, "send_custom_message", None)
-    if sender is None:
-        return
-    result = sender(name, payload)
-    if inspect.isawaitable(result):
-        asyncio.create_task(result)
 
 
 def register_h10_renders(
@@ -257,22 +266,21 @@ def register_h10_renders(
     def h10_ecg_spark():
         stream_key = _selected_h10_stream(input)
         if stream_key is None:
-            return ui.HTML("")
+            return blank_sparkline()
         h10_ecg_latest[stream_key]()  # establish reactive dependency
         samples = list(h10_ecg_samples[stream_key])
         if not samples:
-            return ui.HTML("")
+            return blank_sparkline()
         return sparkline(samples, fmt=lambda v: f"{v:.0f} µV")
 
     @render.ui
     def h10_motion_preview():
-        stream_key = _selected_h10_stream(input)
-        if stream_key is None:
-            return ui.HTML("")
-        frame = h10_motion_latest[stream_key]()
+        trail_points = _motion_trail_points(_selected_h10_stream(input), h10_motion_latest)
+        if trail_points is None:
+            return _na_card_placeholder()
         return ui.HTML(
             motion_plane_svg(
-                frame.get("trail_points", []),
+                trail_points,
                 axes=(0, 1),
                 axis_names=("X", "Y"),
                 detail=False,
@@ -283,10 +291,10 @@ def register_h10_renders(
     def h10_detail_view():
         stream_key = _selected_h10_stream(input)
         if input.h10_chart() == "motion":
-            if stream_key is None:
-                return ui.HTML("")
-            frame = h10_motion_latest[stream_key]()
-            return ui.HTML(motion_detail_row_svg(frame.get("trail_points", [])))
+            trail_points = _motion_trail_points(stream_key, h10_motion_latest)
+            if trail_points is None:
+                return ui.HTML("N/A")
+            return ui.HTML(motion_detail_row_svg(trail_points))
         if input.h10_chart() == "ecg":
             if stream_key is None:
                 return ui.HTML("")
