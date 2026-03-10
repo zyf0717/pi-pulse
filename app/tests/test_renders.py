@@ -491,7 +491,10 @@ def test_gps_value_boxes_format_current_snapshot(monkeypatch) -> None:
     assert registry.text["gps_accuracy_val"]() == "3.4 m"
     assert registry.text["gps_altitude_val"]() == "15.2 m"
     assert registry.text["gps_speed_val"]() == "0.8 m/s"
-    assert registry.text["gps_timestamp_val"]() == "2026-03-10T08:00:00Z"
+    assert registry.ui["gps_timestamp_val"]() == (
+        '16:00:00 <span style="font-family:inherit;font-size:1.4rem;line-height:1;'
+        'color:#9e9e9e;font-variant-numeric:tabular-nums;">GMT+8</span>'
+    )
 
 
 def test_gps_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> None:
@@ -519,7 +522,7 @@ def test_gps_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> None
     assert registry.text["gps_accuracy_val"]() == "N/A"
     assert registry.text["gps_altitude_val"]() == "N/A"
     assert registry.text["gps_speed_val"]() == "N/A"
-    assert registry.text["gps_timestamp_val"]() == "N/A"
+    assert registry.ui["gps_timestamp_val"]() == "N/A"
     assert registry.ui["gps_lat_spark"]() == ""
     assert registry.ui["gps_lon_spark"]() == ""
     assert registry.ui["gps_accuracy_spark"]() == ""

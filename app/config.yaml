@@ -11,4 +11,6 @@ devices:
       "EA78562C": {}
 
   "pixel-7":
+    h10:
+      "6FFF5628": {}
     gps: {}

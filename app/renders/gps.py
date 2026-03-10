@@ -1,12 +1,15 @@
 """GPS renders: value cards only."""
 
 from collections import deque
+from datetime import datetime, timedelta, timezone
 
 from shiny import reactive, render, ui
 
 from app.config import GPS_DEVICES
 from app.renders.render_utils import metric_value, sparkline_values
 from app.sparkline import sparkline
+
+_GMT_PLUS_8 = timezone(timedelta(hours=8))
 
 
 def _gps_spark(
@@ -21,6 +24,30 @@ def _gps_spark(
     if values is None:
         return ui.HTML("")
     return sparkline(values, fmt=fmt) if fmt else sparkline(values)
+
+
+def _format_timestamp(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "N/A"
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(_GMT_PLUS_8).strftime("%H:%M:%S")
+    except ValueError:
+        return text
+
+
+def _timestamp_html(value: object) -> str:
+    formatted = _format_timestamp(value)
+    if formatted == "N/A":
+        return "N/A"
+    return (
+        f'{formatted} '
+        '<span style="font-family:inherit;font-size:1.4rem;line-height:1;'
+        'color:#9e9e9e;font-variant-numeric:tabular-nums;">GMT+8</span>'
+    )
 
 
 def register_gps_renders(
@@ -80,12 +107,12 @@ def register_gps_renders(
             lambda value: f"{value:.1f} m/s",
         )
 
-    @render.text
+    @render.ui
     def gps_timestamp_val():
         if input.device() not in GPS_DEVICES:
-            return "N/A"
+            return ui.HTML("N/A")
         value = gps_latest[input.device()]().get("timestamp", "")
-        return str(value or "N/A")
+        return ui.HTML(_timestamp_html(value))
 
     @render.ui
     def gps_lat_spark():

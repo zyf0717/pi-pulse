@@ -105,8 +105,19 @@ def _visual_card(
     )
 
 
-def _static_metric_card(header_content, value_output_id: str, spark_output_id: str | None = None):
-    body_children = [ui.div(ui.output_text(value_output_id), class_="fs-3 fw-bold p-2")]
+def _static_metric_card(
+    header_content,
+    value_output_id: str,
+    spark_output_id: str | None = None,
+    *,
+    value_output_kind: str = "text",
+):
+    value_output = (
+        ui.output_ui(value_output_id)
+        if value_output_kind == "ui"
+        else ui.output_text(value_output_id)
+    )
+    body_children = [ui.div(value_output, class_="fs-3 fw-bold p-2")]
     if spark_output_id is not None:
         body_children.append(ui.output_ui(spark_output_id))
     return ui.card(
@@ -248,7 +259,13 @@ def _gps_cards():
         _static_metric_card(title, value_output_id, spark_output_id)
         for title, value_output_id, spark_output_id in _GPS_CARD_SPECS
     ]
-    cards.append(_static_metric_card("Timestamp", "gps_timestamp_val"))
+    cards.append(
+        _static_metric_card(
+            "Timestamp",
+            "gps_timestamp_val",
+            value_output_kind="ui",
+        )
+    )
     return cards
 
 

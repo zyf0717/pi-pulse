@@ -197,6 +197,9 @@ def test_gps_cards_are_static_summary_cards(monkeypatch) -> None:
     assert len(cards) == 6
     assert all(card["tag"] == "card" for card in cards)
     assert cards[-1]["args"][0]["args"][0] == "Timestamp"
+    timestamp_value = cards[-1]["args"][1]["args"][0]["args"][0]
+    assert timestamp_value["tag"] == "output_ui"
+    assert timestamp_value["args"] == ("gps_timestamp_val",)
 
 
 def test_h10_panel_includes_stream_selector_placeholder(monkeypatch) -> None:
