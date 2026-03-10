@@ -91,3 +91,16 @@ def test_relay_exposes_generic_ingest_and_stream_routes():
 
     assert "/ingest/{device_id}/{system_key}/{instance_id}/{stream_name}" in route_paths
     assert "/{device_id}/{system_key}/{instance_id}/{stream_name}" in route_paths
+
+
+def test_publish_replaces_stale_pending_frame_when_subscriber_queue_is_full():
+    relay = _load_relay_app()
+    key = stream_key("pulse", "10")
+    queue = asyncio.Queue(maxsize=1)
+    queue.put_nowait({"cpu": 10.0})
+    relay._stream_state(key).subscribers.append(queue)
+
+    relay._publish(key, {"cpu": 20.0})
+
+    assert queue.qsize() == 1
+    assert queue.get_nowait() == {"cpu": 20.0}

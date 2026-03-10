@@ -15,6 +15,23 @@ def encode_sse(payload: Any) -> str:
     return f"data: {json.dumps(payload)}\n\n"
 
 
+def put_latest(q: asyncio.Queue, payload: Any) -> None:
+    """
+    Enqueue the newest payload, evicting stale pending frames if necessary.
+
+    This keeps slow subscribers biased toward current state instead of backlog.
+    """
+    while True:
+        try:
+            q.put_nowait(payload)
+            return
+        except asyncio.QueueFull:
+            try:
+                q.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+
+
 def sse_response(stream) -> StreamingResponse:
     """Wrap an async generator as a no-buffering SSE response."""
     return StreamingResponse(

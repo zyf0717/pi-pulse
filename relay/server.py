@@ -12,7 +12,7 @@ if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from relay.config import HOST, PORT, QUEUE_MAXSIZE
-from rpi4.sse import encode_sse, queue_stream, sse_response
+from rpi4.sse import encode_sse, put_latest, queue_stream, sse_response
 from shared.streams import (
     DEFAULT_INSTANCE,
     is_multi_instance,
@@ -54,10 +54,7 @@ def _publish(key: str, payload: dict) -> None:
     state = _stream_state(key)
     state.latest = payload
     for queue in list(state.subscribers):
-        try:
-            queue.put_nowait(payload)
-        except asyncio.QueueFull:
-            pass
+        put_latest(queue, payload)
 
 
 async def _relay_stream(key: str, *, max_frames: int | None = None):
