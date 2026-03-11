@@ -6,9 +6,9 @@ relay on the dashboard host instead of serving local SSE endpoints.
 """
 
 import asyncio
+import sys
 from collections.abc import Callable
 from pathlib import Path
-import sys
 
 import httpx
 from bleak import BleakClient
@@ -36,6 +36,7 @@ from rpi4.h10_protocol import (
 from rpi4.relay_push import (
     detect_node_id,
     log_post_failure,
+    now_iso,
     post_payload,
     relay_timeout,
 )
@@ -53,7 +54,9 @@ def build_notification_handlers(
     publish: Callable[[str, dict], None],
 ):
     def handle_hr_notification(_: int, data: bytearray) -> None:
-        publish(DEFAULT_STREAM, parse_hr_measurement(bytes(data)))
+        payload = parse_hr_measurement(bytes(data))
+        payload.setdefault("timestamp", now_iso())
+        publish(DEFAULT_STREAM, payload)
 
     def handle_pmd_notification(_: int, data: bytearray) -> None:
         packet = bytes(data)
@@ -68,7 +71,11 @@ def build_notification_handlers(
                 return
             publish(
                 "ecg",
-                {"samples_uv": samples, "sample_rate_hz": ECG_SAMPLE_RATE_HZ},
+                {
+                    "samples_uv": samples,
+                    "sample_rate_hz": ECG_SAMPLE_RATE_HZ,
+                    "timestamp": now_iso(),
+                },
             )
             return
 
@@ -83,6 +90,7 @@ def build_notification_handlers(
                     "samples_mg": samples,
                     "sample_rate_hz": ACC_SAMPLE_RATE_HZ,
                     "range_g": ACC_RANGE_G,
+                    "timestamp": now_iso(),
                 },
             )
 
@@ -99,6 +107,7 @@ async def ble_loop(
     pending_pushes: set[asyncio.Task] = set()
 
     async with httpx.AsyncClient(timeout=relay_timeout()) as client:
+
         def publish(channel_key: str, payload: dict) -> None:
             path = ingest_path("h10", node_id, channel_key, instance_id=device_id)
 

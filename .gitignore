@@ -155,3 +155,6 @@ cron.sh
 
 # local Pi BLE config
 rpi4/h10_addresses.yaml
+
+# local Codex repo instructions
+AGENTS.md

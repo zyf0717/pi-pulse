@@ -134,12 +134,13 @@ def test_push_environmental_loop_posts_to_relay():
     )
 
     assert len(instances) == 1
-    assert instances[0].posts == [
-        (
-            "http://192.168.121.1:8010/ingest/11/sen66/main/default",
-            sen66.read_environmental(sensor),
-        )
-    ]
+    url, payload = instances[0].posts[0]
+    assert url == "http://192.168.121.1:8010/ingest/11/sen66/main/default"
+    assert "timestamp" in payload
+    expected = sen66.read_environmental(sensor)
+    assert {k: v for k, v in payload.items() if k != "timestamp"} == {
+        k: v for k, v in expected.items() if k != "timestamp"
+    }
 
 
 def test_push_number_concentration_loop_posts_to_relay():
@@ -160,12 +161,13 @@ def test_push_number_concentration_loop_posts_to_relay():
     )
 
     assert len(instances) == 1
-    assert instances[0].posts == [
-        (
-            "http://192.168.121.1:8010/ingest/11/sen66/main/number_concentration",
-            sen66.read_number_concentration(sensor),
-        )
-    ]
+    url, payload = instances[0].posts[0]
+    assert url == "http://192.168.121.1:8010/ingest/11/sen66/main/number_concentration"
+    assert "timestamp" in payload
+    expected = sen66.read_number_concentration(sensor)
+    assert {k: v for k, v in payload.items() if k != "timestamp"} == {
+        k: v for k, v in expected.items() if k != "timestamp"
+    }
 
 
 def test_push_environmental_loop_logs_failures():

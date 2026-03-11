@@ -1,7 +1,7 @@
 import asyncio
+import sys
 import time
 from pathlib import Path
-import sys
 from typing import Any, Dict, Optional, Tuple
 
 import httpx
@@ -10,7 +10,13 @@ import psutil
 if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from rpi4.relay_push import detect_node_id, log_post_failure, post_payload, relay_timeout
+from rpi4.relay_push import (
+    detect_node_id,
+    log_post_failure,
+    now_iso,
+    post_payload,
+    relay_timeout,
+)
 from shared.streams import ingest_path
 
 
@@ -96,6 +102,7 @@ def collect_metrics(
     tx_bps = max(0, (net_now["tx_bytes"] - last_net["tx_bytes"]) / dt)
 
     stats: Dict[str, Any] = {
+        "timestamp": now_iso(),
         "cpu_total_pct": cpu_total,
         "cpu_per_core_pct": cpu_per_core,
         "cpu_freq_avg_mhz": freq_avg_mhz,
@@ -142,6 +149,14 @@ async def push_metrics_loop(
             frame += 1
             if max_frames is None or frame < max_frames:
                 await asyncio.sleep(sample_period_s)
+
+
+async def main() -> None:
+    await push_metrics_loop()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 
 
 async def main() -> None:

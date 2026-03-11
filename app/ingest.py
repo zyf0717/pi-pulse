@@ -7,7 +7,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 from shiny import reactive
 
@@ -243,6 +243,23 @@ def _motion_subwindows(
     ]
 
 
+def _payload_timestamp(data: dict) -> datetime | None:
+    timestamp = data.get("timestamp")
+    if not isinstance(timestamp, str) or not timestamp:
+        return None
+    try:
+        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
+def _history_datetime_from_packet(data: dict) -> datetime:
+    return _payload_timestamp(data) or datetime.now()
+
+
 def _reactive_values(keys) -> dict[str, reactive.Value]:
     return {key: reactive.Value({}) for key in keys}
 
@@ -354,13 +371,13 @@ async def _on_sen66_nc(state: IngestState, key: str, data: dict) -> None:
 
 async def _on_gps(state: IngestState, key: str, data: dict) -> None:
     normalized = normalize_gps_sample(data)
-    state.gps_history[key].append((datetime.now(), normalized))
+    state.gps_history[key].append((_history_datetime_from_packet(normalized), normalized))
     state.gps_latest[key].set(normalized)
 
 
 async def _on_h10(state: IngestState, key: str, data: dict) -> None:
     normalized = normalize_h10_sample(data)
-    state.h10_history[key].append((datetime.now(), normalized))
+    state.h10_history[key].append((_history_datetime_from_packet(normalized), normalized))
     state.h10_latest[key].set(normalized)
 
 
@@ -399,7 +416,7 @@ async def _on_h10_acc(state: IngestState, key: str, data: dict) -> None:
             "mean_dynamic_accel_mg": _mean_dynamic_acceleration_mg(window_samples),
             "sample_rate_hz": state.h10_acc_sample_rate[key],
         }
-        state.h10_acc_history[key].append((datetime.now(), aggregated))
+        state.h10_acc_history[key].append((_history_datetime_from_packet(data), aggregated))
         state.h10_acc_latest[key].set(aggregated)
 
     now = time.monotonic()
@@ -427,7 +444,7 @@ async def _on_h10_acc(state: IngestState, key: str, data: dict) -> None:
 
 async def _on_pacer_hr(state: IngestState, key: str, data: dict) -> None:
     normalized = normalize_pacer_hr_sample(data)
-    state.pacer_hr_history[key].append((datetime.now(), normalized))
+    state.pacer_hr_history[key].append((_history_datetime_from_packet(normalized), normalized))
     state.pacer_hr_latest[key].set(normalized)
 
 
@@ -436,8 +453,9 @@ async def _on_pacer_ppi(state: IngestState, key: str, data: dict) -> None:
     if not normalized["samples"]:
         return
 
+    history_time = _history_datetime_from_packet(normalized)
     for sample in normalized["samples"]:
-        state.pacer_ppi_history[key].append((datetime.now(), sample))
+        state.pacer_ppi_history[key].append((history_time, sample))
 
     latest = dict(normalized["samples"][-1])
     latest["timestamp"] = normalized["timestamp"]
@@ -463,7 +481,7 @@ async def _on_pacer_acc(state: IngestState, key: str, data: dict) -> None:
             "mean_dynamic_accel_mg": _mean_dynamic_acceleration_mg(window_samples),
             "sample_rate_hz": state.pacer_acc_sample_rate[key],
         }
-        state.pacer_acc_history[key].append((datetime.now(), aggregated))
+        state.pacer_acc_history[key].append((_history_datetime_from_packet(data), aggregated))
         state.pacer_acc_latest[key].set(aggregated)
 
     gravity_x, gravity_y, gravity_z = state.pacer_motion_gravity[key]

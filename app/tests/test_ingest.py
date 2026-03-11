@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from types import ModuleType
 import importlib.util
@@ -265,6 +266,63 @@ def test_normalize_h10_acc_chunk_filters_invalid_samples_and_defaults_rate(
     }
 
 
+def test_normalize_h10_acc_chunk_does_not_add_timestamps(
+    monkeypatch,
+) -> None:
+    ingest_module, _ = _load_ingest_module(monkeypatch)
+
+    normalized = ingest_module.normalize_h10_acc_chunk(
+        {
+            "samples_mg": [
+                {"x_mg": 10, "y_mg": 0, "z_mg": 1000},
+                {"x_mg": 20, "y_mg": 0, "z_mg": 1000},
+                {"x_mg": 30, "y_mg": 0, "z_mg": 1000},
+            ],
+            "sample_rate_hz": 50,
+            "timestamp": "2026-03-11T09:03:09.536661Z",
+        }
+    )
+
+    assert normalized == {
+        "samples_mg": [
+            {"x_mg": 10.0, "y_mg": 0.0, "z_mg": 1000.0},
+            {"x_mg": 20.0, "y_mg": 0.0, "z_mg": 1000.0},
+            {"x_mg": 30.0, "y_mg": 0.0, "z_mg": 1000.0},
+        ],
+        "sample_rate_hz": 50,
+    }
+
+
+def test_history_datetime_from_packet_falls_back_to_now_for_invalid_timestamp(
+    monkeypatch,
+) -> None:
+    ingest_module, _ = _load_ingest_module(monkeypatch)
+    expected = datetime(2026, 3, 11, 9, 5, 0, 123456)
+
+    class _FakeDateTime:
+        @staticmethod
+        def now():
+            return expected
+
+        @staticmethod
+        def fromisoformat(value):
+            return datetime.fromisoformat(value)
+
+    monkeypatch.setattr(ingest_module, "datetime", _FakeDateTime)
+
+    assert ingest_module._history_datetime_from_packet({"timestamp": "not-a-timestamp"}) == (
+        expected
+    )
+
+
+def test_history_datetime_from_packet_uses_valid_payload_timestamp(monkeypatch) -> None:
+    ingest_module, _ = _load_ingest_module(monkeypatch)
+
+    assert ingest_module._history_datetime_from_packet(
+        {"timestamp": "2026-03-11T09:05:10.100000Z"}
+    ) == datetime(2026, 3, 11, 9, 5, 10, 100000)
+
+
 def test_normalize_pacer_ppi_chunk_filters_invalid_samples(monkeypatch) -> None:
     ingest_module, _ = _load_ingest_module(monkeypatch)
 
@@ -334,3 +392,121 @@ def test_pacer_acc_uses_subwindows_for_motion_trail(monkeypatch) -> None:
     trail_points = state.pacer_motion_latest["pixel-7:DA2E2324"]()["trail_points"]
     assert len(trail_points) == 6
     assert state.pacer_acc_latest["pixel-7:DA2E2324"]()["sample_rate_hz"] == 50
+
+
+def test_pacer_acc_history_uses_packet_timestamp(monkeypatch) -> None:
+    ingest_module, _ = _load_ingest_module(monkeypatch)
+    state = ingest_module.build_ingest_state()
+
+    packet = {
+        "samples_mg": [
+            {"x_mg": float(index), "y_mg": 0.0, "z_mg": 1000.0}
+            for index in range(100)
+        ],
+        "sample_rate_hz": 50,
+        "timestamp": "2026-03-11T09:03:09.536661Z",
+    }
+
+    asyncio.run(ingest_module._on_pacer_acc(state, "pixel-7:DA2E2324", packet))
+
+    history = list(state.pacer_acc_history["pixel-7:DA2E2324"])
+    assert [timestamp.isoformat() for timestamp, _ in history] == [
+        "2026-03-11T09:03:09.536661",
+        "2026-03-11T09:03:09.536661",
+    ]
+
+
+def test_h10_hr_history_uses_packet_timestamp_when_present(monkeypatch) -> None:
+    ingest_module, _ = _load_ingest_module(monkeypatch)
+    state = ingest_module.build_ingest_state()
+
+    asyncio.run(
+        ingest_module._on_h10(
+            state,
+            "11:6FFF5628",
+            {"bpm": 72, "timestamp": "2026-03-11T09:05:10.100000Z"},
+        )
+    )
+
+    history = list(state.h10_history["11:6FFF5628"])
+    assert [timestamp.isoformat() for timestamp, _ in history] == [
+        "2026-03-11T09:05:10.100000"
+    ]
+
+
+def test_pacer_hr_history_uses_packet_timestamp_when_present(monkeypatch) -> None:
+    ingest_module, _ = _load_ingest_module(monkeypatch)
+    state = ingest_module.build_ingest_state()
+
+    asyncio.run(
+        ingest_module._on_pacer_hr(
+            state,
+            "pixel-7:DA2E2324",
+            {"bpm": 60, "timestamp": "2026-03-11T09:04:09.676246Z"},
+        )
+    )
+
+    history = list(state.pacer_hr_history["pixel-7:DA2E2324"])
+    assert [timestamp.isoformat() for timestamp, _ in history] == [
+        "2026-03-11T09:04:09.676246"
+    ]
+
+
+def test_h10_acc_history_uses_packet_timestamp_when_packet_timestamp_present(
+    monkeypatch,
+) -> None:
+    ingest_module, _ = _load_ingest_module(monkeypatch)
+    state = ingest_module.build_ingest_state()
+
+    packet = {
+        "samples_mg": [
+            {"x_mg": float(index), "y_mg": 0.0, "z_mg": 1000.0}
+            for index in range(100)
+        ],
+        "sample_rate_hz": 200,
+        "timestamp": "2026-03-11T09:03:09.536661Z",
+    }
+
+    asyncio.run(ingest_module._on_h10_acc(state, "11:6FFF5628", packet))
+
+    history = list(state.h10_acc_history["11:6FFF5628"])
+    assert [timestamp.isoformat() for timestamp, _ in history] == [
+        "2026-03-11T09:03:09.536661",
+    ]
+
+
+def test_pacer_ppi_history_uses_packet_timestamp(monkeypatch) -> None:
+    ingest_module, _ = _load_ingest_module(monkeypatch)
+    state = ingest_module.build_ingest_state()
+
+    packet = {
+        "samples": [
+            {
+                "ppi_ms": 955,
+                "error_estimate_ms": 79,
+                "hr": 60,
+                "blocker_bit": False,
+                "skin_contact_status": True,
+                "skin_contact_supported": True,
+                "timestamp_ns": 1000000000,
+            },
+            {
+                "ppi_ms": 940,
+                "error_estimate_ms": 65,
+                "hr": 61,
+                "blocker_bit": False,
+                "skin_contact_status": True,
+                "skin_contact_supported": True,
+                "timestamp_ns": 1020000000,
+            }
+        ],
+        "timestamp": "2026-03-11T09:04:09.676246Z",
+    }
+
+    asyncio.run(ingest_module._on_pacer_ppi(state, "pixel-7:DA2E2324", packet))
+
+    history = list(state.pacer_ppi_history["pixel-7:DA2E2324"])
+    assert [timestamp.isoformat() for timestamp, _ in history] == [
+        "2026-03-11T09:04:09.676246",
+        "2026-03-11T09:04:09.676246",
+    ]

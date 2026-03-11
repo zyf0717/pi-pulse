@@ -1,7 +1,7 @@
 import asyncio
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-import sys
 from typing import Dict, Optional
 
 import httpx
@@ -12,7 +12,13 @@ from sensirion_i2c_sen66.device import Sen66Device
 if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from rpi4.relay_push import detect_node_id, log_post_failure, post_payload, relay_timeout
+from rpi4.relay_push import (
+    detect_node_id,
+    log_post_failure,
+    now_iso,
+    post_payload,
+    relay_timeout,
+)
 from shared.streams import ingest_path
 
 
@@ -41,6 +47,7 @@ def read_environmental(snsr) -> Dict:
         ) = snsr.read_measured_values()
 
         return {
+            "timestamp": now_iso(),
             "temperature_c": _safe(temperature),
             "humidity_rh": _safe(humidity),
             "co2_ppm": _safe(co2),
@@ -60,6 +67,7 @@ def read_number_concentration(snsr) -> Dict:
     try:
         nc0p5, nc1p0, nc2p5, nc4p0, nc10p0 = snsr.read_number_concentration_values()
         return {
+            "timestamp": now_iso(),
             "nc_pm0_5_pcm3": _safe(nc0p5),
             "nc_pm1_0_pcm3": _safe(nc1p0),
             "nc_pm2_5_pcm3": _safe(nc2p5),

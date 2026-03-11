@@ -3,10 +3,10 @@ import os
 import socket
 import sys
 import time
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import httpx
-
 
 log = logging.getLogger(__name__)
 
@@ -17,7 +17,9 @@ if __name__ == "relay_push":
 elif __name__ == "rpi4.relay_push":
     sys.modules.setdefault("relay_push", sys.modules[__name__])
 
-RELAY_BASE_URL = os.getenv("PI_PULSE_RELAY_URL", "http://192.168.121.1:8010").rstrip("/")
+RELAY_BASE_URL = os.getenv("PI_PULSE_RELAY_URL", "http://192.168.121.1:8010").rstrip(
+    "/"
+)
 RELAY_TIMEOUT_S = float(os.getenv("PI_PULSE_RELAY_TIMEOUT_S", "5"))
 RELAY_NODE_ID_ENV = "PI_PULSE_NODE_ID"
 RELAY_BACKOFF_INITIAL_S = float(os.getenv("PI_PULSE_RELAY_BACKOFF_INITIAL_S", "0.5"))
@@ -55,6 +57,15 @@ def detect_node_id(relay_base_url: str = RELAY_BASE_URL) -> str:
 
 def ingest_url(path: str, relay_base_url: str = RELAY_BASE_URL) -> str:
     return f"{relay_base_url}/{path.lstrip('/')}"
+
+
+def now_iso() -> str:
+    """Return the current UTC time as an ISO 8601 string with microsecond precision."""
+    return (
+        datetime.now(timezone.utc)
+        .isoformat(timespec="microseconds")
+        .replace("+00:00", "Z")
+    )
 
 
 def relay_timeout() -> httpx.Timeout:

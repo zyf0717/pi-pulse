@@ -148,18 +148,23 @@ def test_build_notification_handlers_publish_expected_stream_payloads():
     pmd_handler(0, bytearray(_build_ecg_packet([100, -200, 300])))
     pmd_handler(0, bytearray(_build_acc_packet([(1, -2, 3)])))
 
-    assert published == [
-        ("default", {"bpm": 72, "rr_ms": [1000]}),
-        ("ecg", {"samples_uv": [100, -200, 300], "sample_rate_hz": 130}),
-        (
-            "acc",
-            {
-                "samples_mg": [{"x_mg": 1, "y_mg": -2, "z_mg": 3}],
-                "sample_rate_hz": 200,
-                "range_g": 8,
-            },
-        ),
-    ]
+    assert [stream_name for stream_name, _ in published] == ["default", "ecg", "acc"]
+
+    hr_payload = published[0][1]
+    assert hr_payload["bpm"] == 72
+    assert hr_payload["rr_ms"] == [1000]
+    assert hr_payload["timestamp"].endswith("Z")
+
+    ecg_payload = published[1][1]
+    assert ecg_payload["samples_uv"] == [100, -200, 300]
+    assert ecg_payload["sample_rate_hz"] == 130
+    assert ecg_payload["timestamp"].endswith("Z")
+
+    acc_payload = published[2][1]
+    assert acc_payload["samples_mg"] == [{"x_mg": 1, "y_mg": -2, "z_mg": 3}]
+    assert acc_payload["sample_rate_hz"] == 200
+    assert acc_payload["range_g"] == 8
+    assert acc_payload["timestamp"].endswith("Z")
 
 
 def test_build_notification_handlers_drops_invalid_pmd_frames():
