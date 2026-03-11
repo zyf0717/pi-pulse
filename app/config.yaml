@@ -20,6 +20,8 @@ devices:
           field: thermal_headroom
           label: Thermal Headroom
           unit: null
+    gps: {}
     h10:
       "6FFF5628": {}
-    gps: {}
+    pacer:
+      "DA2E2324": {}

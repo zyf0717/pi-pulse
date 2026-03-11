@@ -83,6 +83,11 @@ def _load_layout_module(monkeypatch):
         "acc_dyn": "Mean Dynamic Acceleration",
         "motion": "Acceleration Axes",
     }
+    fake_config.PACER_CHARTS = {
+        "hr": "Heart Rate (BPM)",
+        "acc": "Acceleration (mg)",
+        "ppi": "PPI (ms)",
+    }
 
     monkeypatch.setitem(sys.modules, "shiny", fake_shiny)
     monkeypatch.setitem(sys.modules, "shinyswatch", fake_shinyswatch)
@@ -202,6 +207,25 @@ def test_gps_cards_are_static_summary_cards(monkeypatch) -> None:
     assert timestamp_value["args"] == ("gps_timestamp_val",)
 
 
+def test_pacer_cards_match_chart_mapping(monkeypatch) -> None:
+    module = _load_layout_module(monkeypatch)
+
+    cards = module._pacer_cards()
+
+    assert len(cards) == 3
+    assert [card["kwargs"]["data-chart-target"] for card in cards] == [
+        "pacer_chart"
+    ] * 3
+    assert [card["kwargs"]["data-chart-value"] for card in cards] == [
+        "hr",
+        "acc",
+        "ppi",
+    ]
+    first_header = cards[0]["args"][0]["args"][0]
+    assert first_header["tag"] == "card_header"
+    assert first_header["args"][0] == "Heart Rate"
+
+
 def test_h10_panel_includes_stream_selector_placeholder(monkeypatch) -> None:
     module = _load_layout_module(monkeypatch)
 
@@ -223,6 +247,27 @@ def test_h10_panel_includes_stream_selector_placeholder(monkeypatch) -> None:
     )
 
 
+def test_pacer_panel_includes_stream_selector_placeholder(monkeypatch) -> None:
+    module = _load_layout_module(monkeypatch)
+
+    panel = module._pacer_panel()
+    control_row = next(
+        item
+        for item in panel["args"]
+        if isinstance(item, dict)
+        and item["tag"] == "div"
+        and item["kwargs"].get("class_")
+        == "d-flex flex-wrap align-items-end gap-3 justify-content-start"
+    )
+
+    assert panel["tag"] == "nav_panel"
+    assert any(
+        item["tag"] == "output_ui" and item["args"] == ("pacer_device_selector",)
+        for item in control_row["args"]
+        if isinstance(item, dict)
+    )
+
+
 def test_app_ui_includes_gps_panel(monkeypatch) -> None:
     module = _load_layout_module(monkeypatch)
 
@@ -230,6 +275,7 @@ def test_app_ui_includes_gps_panel(monkeypatch) -> None:
     panel_titles = [panel["args"][0] for panel in navset["args"] if isinstance(panel, dict)]
 
     assert "GPS" in panel_titles
+    assert "Pacer" in panel_titles
 
 
 def test_app_ui_includes_static_assets(monkeypatch) -> None:

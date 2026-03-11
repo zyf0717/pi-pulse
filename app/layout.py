@@ -10,6 +10,7 @@ from app.config import (
     ALL_DEVICES_DEFAULT,
     H10_ACC_DYNAMIC_WINDOW_S,
     H10_CHARTS,
+    PACER_CHARTS,
     PULSE_CHARTS,
     SEN66_CHARTS,
 )
@@ -49,6 +50,12 @@ _GPS_CARD_SPECS = [
     ("Accuracy", "gps_accuracy_val", "gps_accuracy_spark"),
     ("Altitude", "gps_altitude_val", "gps_altitude_spark"),
     ("Speed", "gps_speed_val", "gps_speed_spark"),
+]
+
+_PACER_CARD_SPECS = [
+    ("Heart Rate", "pacer_hr_val", "pacer_hr_spark", "hr"),
+    ("Acceleration", "pacer_acc_val", "pacer_acc_spark", "acc"),
+    ("PPI", "pacer_ppi_val", "pacer_ppi_spark", "ppi"),
 ]
 
 
@@ -272,6 +279,19 @@ def _gps_cards():
     return cards
 
 
+def _pacer_cards():
+    return [
+        _metric_card(
+            title,
+            value_output_id,
+            spark_output_id,
+            chart_target="pacer_chart",
+            chart_value=chart_value,
+        )
+        for title, value_output_id, spark_output_id, chart_value in _PACER_CARD_SPECS
+    ]
+
+
 def _system_panel():
     return ui.nav_panel(
         "System",
@@ -332,6 +352,26 @@ def _gps_panel():
     )
 
 
+def _pacer_panel():
+    return ui.nav_panel(
+        "Pacer",
+        ui.br(),
+        ui.layout_column_wrap(*_pacer_cards(), fill=False),
+        ui.hr(),
+        ui.div(
+            ui.output_ui("pacer_device_selector"),
+            ui.input_select(
+                "pacer_chart",
+                "",
+                PACER_CHARTS,
+                selected="hr",
+            ),
+            class_="d-flex flex-wrap align-items-end gap-3 justify-content-start",
+        ),
+        ui.output_ui("pacer_detail_view"),
+    )
+
+
 app_ui = ui.page_sidebar(
     ui.sidebar(
         ui.input_select(
@@ -361,8 +401,9 @@ app_ui = ui.page_sidebar(
     ui.navset_tab(
         _system_panel(),
         _sen66_panel(),
-        _h10_panel(),
         _gps_panel(),
+        _h10_panel(),
+        _pacer_panel(),
         selected="SEN66",
     ),
     theme=shinyswatch.theme.darkly,

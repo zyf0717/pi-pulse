@@ -229,3 +229,9 @@ H10_CHARTS = {
     "acc_dyn": "Mean Dynamic Acceleration",
     "motion": "Acceleration Axes",
 }
+
+PACER_CHARTS = {
+    "hr": "Heart Rate (BPM)",
+    "acc": "Acceleration (mg)",
+    "ppi": "PPI (ms)",
+}
