@@ -6,11 +6,12 @@ DEFAULT_STREAM = "default"
 SYSTEM_STREAMS = {
     "pulse": (DEFAULT_STREAM,),
     "sen66": (DEFAULT_STREAM, "number_concentration"),
-    "h10": (DEFAULT_STREAM, "ecg", "acc"),
     "gps": (DEFAULT_STREAM,),
+    "h10": (DEFAULT_STREAM, "ecg", "acc"),
+    "pacer": ("hr", "acc", "ppi"),
 }
 
-MULTI_INSTANCE_SYSTEMS = {"h10"}
+MULTI_INSTANCE_SYSTEMS = {"h10", "pacer"}
 
 
 def system_streams(system_key: str) -> tuple[str, ...]:

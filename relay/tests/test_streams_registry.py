@@ -15,8 +15,9 @@ def test_registry_is_just_system_to_stream_names():
     assert SYSTEM_STREAMS == {
         "pulse": (DEFAULT_STREAM,),
         "sen66": (DEFAULT_STREAM, "number_concentration"),
-        "h10": (DEFAULT_STREAM, "ecg", "acc"),
         "gps": (DEFAULT_STREAM,),
+        "h10": (DEFAULT_STREAM, "ecg", "acc"),
+        "pacer": ("hr", "acc", "ppi"),
     }
 
 
@@ -37,6 +38,16 @@ def test_multi_instance_paths_require_instance_id():
     )
     assert stream_key("h10", "11", "ecg", instance_id="6FFF5628") == (
         "11/h10/6FFF5628/ecg"
+    )
+    assert is_multi_instance("pacer") is True
+    assert ingest_path("pacer", "pixel-7", "hr", instance_id="DA2E2324") == (
+        "/ingest/pixel-7/pacer/DA2E2324/hr"
+    )
+    assert stream_path("pacer", "pixel-7", "acc", instance_id="DA2E2324") == (
+        "/pixel-7/pacer/DA2E2324/acc"
+    )
+    assert stream_key("pacer", "pixel-7", "ppi", instance_id="DA2E2324") == (
+        "pixel-7/pacer/DA2E2324/ppi"
     )
 
 
