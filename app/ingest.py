@@ -16,6 +16,9 @@ from app.config import (
     GPS_DEVICES,
     H10_ACC_DYNAMIC_WINDOW_S,
     H10_DEVICES,
+    PACER_ACC_DYNAMIC_WINDOW_S,
+    PACER_DEVICES,
+    PACER_MOTION_SUBWINDOW_S,
     SEN66_DEVICES,
 )
 from app.streams.consumer import stream_consumer
@@ -150,6 +153,50 @@ def normalize_gps_sample(data: dict) -> dict:
     return sample
 
 
+def normalize_pacer_hr_sample(data: dict) -> dict:
+    return normalize_h10_sample(data)
+
+
+def normalize_pacer_ppi_chunk(data: dict) -> dict:
+    sample_rows = data.get("samples", [])
+    if not isinstance(sample_rows, list):
+        sample_rows = []
+
+    normalized_samples = []
+    for sample in sample_rows:
+        if not isinstance(sample, dict):
+            continue
+        ppi_ms = sample.get("ppi_ms")
+        if not isinstance(ppi_ms, (int, float)) or isinstance(ppi_ms, bool):
+            continue
+        error_estimate_ms = sample.get("error_estimate_ms", 0.0)
+        if not isinstance(error_estimate_ms, (int, float)) or isinstance(
+            error_estimate_ms, bool
+        ):
+            error_estimate_ms = 0.0
+        timestamp_ns = sample.get("timestamp_ns")
+        if not isinstance(timestamp_ns, int) or isinstance(timestamp_ns, bool):
+            timestamp_ns = 0
+        normalized_samples.append(
+            {
+                "ppi_ms": float(ppi_ms),
+                "error_estimate_ms": float(error_estimate_ms),
+                "heart_rate_bpm": _first_numeric(sample, "heart_rate_bpm", "heart_rate", "hr"),
+                "blocker_bit": bool(sample.get("blocker_bit", False)),
+                "skin_contact_status": bool(sample.get("skin_contact_status", False)),
+                "skin_contact_supported": bool(
+                    sample.get("skin_contact_supported", False)
+                ),
+                "timestamp_ns": timestamp_ns,
+            }
+        )
+
+    return {
+        "samples": normalized_samples,
+        "timestamp": str(data.get("timestamp") or ""),
+    }
+
+
 def _mean_dynamic_acceleration_mg(samples_mg: list[dict]) -> float:
     if not samples_mg:
         return 0.0
@@ -180,6 +227,20 @@ def _mean_xyz_mg(samples_mg: list[dict]) -> tuple[float, float, float]:
         sum(sample["y_mg"] for sample in samples_mg) / sample_count,
         sum(sample["z_mg"] for sample in samples_mg) / sample_count,
     )
+
+
+def _motion_subwindows(
+    samples_mg: list[dict],
+    sample_rate_hz: int,
+    window_s: float,
+) -> list[list[dict]]:
+    if not samples_mg:
+        return []
+    window_size = max(1, int(round(max(sample_rate_hz, 1) * window_s)))
+    return [
+        samples_mg[start : start + window_size]
+        for start in range(0, len(samples_mg), window_size)
+    ]
 
 
 def _reactive_values(keys) -> dict[str, reactive.Value]:
@@ -214,6 +275,17 @@ class IngestState:
     h10_motion_trail: dict[str, deque]
     h10_motion_gravity: dict[str, tuple[float, float, float]]
     h10_motion_last_time: dict[str, float | None]
+    pacer_hr_latest: dict[str, reactive.Value]
+    pacer_hr_history: dict[str, deque]
+    pacer_ppi_latest: dict[str, reactive.Value]
+    pacer_ppi_history: dict[str, deque]
+    pacer_acc_latest: dict[str, reactive.Value]
+    pacer_acc_history: dict[str, deque]
+    pacer_acc_pending: dict[str, deque]
+    pacer_acc_sample_rate: dict[str, int]
+    pacer_motion_latest: dict[str, reactive.Value]
+    pacer_motion_trail: dict[str, deque]
+    pacer_motion_gravity: dict[str, tuple[float, float, float]]
     started: bool = False
     tasks: list = field(default_factory=list)
     start_lock: threading.Lock = field(default_factory=threading.Lock)
@@ -248,6 +320,17 @@ def build_ingest_state() -> IngestState:
         h10_motion_trail={k: deque(maxlen=motion_trail_len) for k in H10_DEVICES},
         h10_motion_gravity={k: (0.0, 0.0, 1000.0) for k in H10_DEVICES},
         h10_motion_last_time={k: None for k in H10_DEVICES},
+        pacer_hr_latest=_reactive_values(PACER_DEVICES),
+        pacer_hr_history=_history_map(PACER_DEVICES, maxlen=60),
+        pacer_ppi_latest=_reactive_values(PACER_DEVICES),
+        pacer_ppi_history=_history_map(PACER_DEVICES, maxlen=180),
+        pacer_acc_latest=_reactive_values(PACER_DEVICES),
+        pacer_acc_history=_history_map(PACER_DEVICES, maxlen=60),
+        pacer_acc_pending={k: deque() for k in PACER_DEVICES},
+        pacer_acc_sample_rate={k: 50 for k in PACER_DEVICES},
+        pacer_motion_latest=_reactive_values(PACER_DEVICES),
+        pacer_motion_trail={k: deque(maxlen=motion_trail_len) for k in PACER_DEVICES},
+        pacer_motion_gravity={k: (0.0, 0.0, 1000.0) for k in PACER_DEVICES},
     )
 
 
@@ -342,6 +425,70 @@ async def _on_h10_acc(state: IngestState, key: str, data: dict) -> None:
     )
 
 
+async def _on_pacer_hr(state: IngestState, key: str, data: dict) -> None:
+    normalized = normalize_pacer_hr_sample(data)
+    state.pacer_hr_history[key].append((datetime.now(), normalized))
+    state.pacer_hr_latest[key].set(normalized)
+
+
+async def _on_pacer_ppi(state: IngestState, key: str, data: dict) -> None:
+    normalized = normalize_pacer_ppi_chunk(data)
+    if not normalized["samples"]:
+        return
+
+    for sample in normalized["samples"]:
+        state.pacer_ppi_history[key].append((datetime.now(), sample))
+
+    latest = dict(normalized["samples"][-1])
+    latest["timestamp"] = normalized["timestamp"]
+    state.pacer_ppi_latest[key].set(latest)
+
+
+async def _on_pacer_acc(state: IngestState, key: str, data: dict) -> None:
+    normalized = normalize_h10_acc_chunk(data)
+    if not normalized["samples_mg"]:
+        return
+
+    samples_mg = normalized["samples_mg"]
+    state.pacer_acc_sample_rate[key] = normalized["sample_rate_hz"]
+    state.pacer_acc_pending[key].extend(samples_mg)
+    window_size = max(
+        1, int(round(state.pacer_acc_sample_rate[key] * PACER_ACC_DYNAMIC_WINDOW_S))
+    )
+    while len(state.pacer_acc_pending[key]) >= window_size:
+        window_samples = [
+            state.pacer_acc_pending[key].popleft() for _ in range(window_size)
+        ]
+        aggregated = {
+            "mean_dynamic_accel_mg": _mean_dynamic_acceleration_mg(window_samples),
+            "sample_rate_hz": state.pacer_acc_sample_rate[key],
+        }
+        state.pacer_acc_history[key].append((datetime.now(), aggregated))
+        state.pacer_acc_latest[key].set(aggregated)
+
+    gravity_x, gravity_y, gravity_z = state.pacer_motion_gravity[key]
+    for subwindow_samples in _motion_subwindows(
+        samples_mg,
+        state.pacer_acc_sample_rate[key],
+        PACER_MOTION_SUBWINDOW_S,
+    ):
+        dt = len(subwindow_samples) / max(state.pacer_acc_sample_rate[key], 1)
+        mean_x, mean_y, mean_z = _mean_xyz_mg(subwindow_samples)
+        gravity_alpha = min(1.0, dt / max(PACER_ACC_DYNAMIC_WINDOW_S, 0.001))
+        next_gravity = (
+            gravity_x + ((mean_x - gravity_x) * gravity_alpha),
+            gravity_y + ((mean_y - gravity_y) * gravity_alpha),
+            gravity_z + ((mean_z - gravity_z) * gravity_alpha),
+        )
+        gravity_x, gravity_y, gravity_z = next_gravity
+        state.pacer_motion_trail[key].append(next_gravity)
+
+    state.pacer_motion_gravity[key] = (gravity_x, gravity_y, gravity_z)
+    state.pacer_motion_latest[key].set(
+        {"trail_points": list(state.pacer_motion_trail[key])}
+    )
+
+
 def _create_stream_tasks(state: IngestState) -> list:
     tasks = (
         [
@@ -415,6 +562,39 @@ def _create_stream_tasks(state: IngestState) -> list:
             )
             for key, device in H10_DEVICES.items()
             if device.get("acc")
+        ]
+        + [
+            asyncio.create_task(
+                stream_consumer(
+                    f"pacer-hr-{key}",
+                    device["hr"],
+                    lambda data, key=key: _on_pacer_hr(state, key, data),
+                )
+            )
+            for key, device in PACER_DEVICES.items()
+            if device.get("hr")
+        ]
+        + [
+            asyncio.create_task(
+                stream_consumer(
+                    f"pacer-acc-{key}",
+                    device["acc"],
+                    lambda data, key=key: _on_pacer_acc(state, key, data),
+                )
+            )
+            for key, device in PACER_DEVICES.items()
+            if device.get("acc")
+        ]
+        + [
+            asyncio.create_task(
+                stream_consumer(
+                    f"pacer-ppi-{key}",
+                    device["ppi"],
+                    lambda data, key=key: _on_pacer_ppi(state, key, data),
+                )
+            )
+            for key, device in PACER_DEVICES.items()
+            if device.get("ppi")
         ]
     )
     for task in tasks:

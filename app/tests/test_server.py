@@ -20,6 +20,7 @@ def _load_server_module(monkeypatch):
         "sen66_register": [],
         "gps_register": [],
         "h10_register": [],
+        "pacer_register": [],
     }
 
     fake_shinyswatch = ModuleType("shinyswatch")
@@ -66,6 +67,13 @@ def _load_server_module(monkeypatch):
         h10_acc_latest={"11:6FFF5628": object()},
         h10_acc_history={"11:6FFF5628": []},
         h10_motion_latest={"11:6FFF5628": object()},
+        pacer_hr_latest={"pixel-7:DA2E2324": object()},
+        pacer_hr_history={"pixel-7:DA2E2324": []},
+        pacer_acc_latest={"pixel-7:DA2E2324": object()},
+        pacer_acc_history={"pixel-7:DA2E2324": []},
+        pacer_motion_latest={"pixel-7:DA2E2324": object()},
+        pacer_ppi_latest={"pixel-7:DA2E2324": object()},
+        pacer_ppi_history={"pixel-7:DA2E2324": []},
     )
 
     def ensure_global_ingest_started():
@@ -90,6 +98,7 @@ def _load_server_module(monkeypatch):
 
     fake_h10 = ModuleType("app.renders.h10")
     fake_gps = ModuleType("app.renders.gps")
+    fake_pacer = ModuleType("app.renders.pacer")
 
     def register_h10_renders(*args) -> None:
         calls["h10_register"].append(args)
@@ -100,6 +109,11 @@ def _load_server_module(monkeypatch):
         calls["gps_register"].append(args)
 
     fake_gps.register_gps_renders = register_gps_renders
+
+    def register_pacer_renders(*args) -> None:
+        calls["pacer_register"].append(args)
+
+    fake_pacer.register_pacer_renders = register_pacer_renders
 
     monkeypatch.setitem(sys.modules, "app", fake_app)
     monkeypatch.setitem(sys.modules, "app.ingest", fake_ingest)
@@ -112,6 +126,7 @@ def _load_server_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "app.renders.pulse", fake_pulse)
     monkeypatch.setitem(sys.modules, "app.renders.sen66", fake_sen66)
     monkeypatch.setitem(sys.modules, "app.renders.h10", fake_h10)
+    monkeypatch.setitem(sys.modules, "app.renders.pacer", fake_pacer)
 
     module_name = "app.server_under_test"
     sys.modules.pop(module_name, None)
@@ -138,6 +153,7 @@ def test_server_starts_global_ingest_and_registers_renders(monkeypatch) -> None:
     assert len(calls["sen66_register"]) == 1
     assert len(calls["gps_register"]) == 1
     assert len(calls["h10_register"]) == 1
+    assert len(calls["pacer_register"]) == 1
 
 
 def test_server_passes_shared_ingest_state_to_render_registration(monkeypatch) -> None:
@@ -150,6 +166,7 @@ def test_server_passes_shared_ingest_state_to_render_registration(monkeypatch) -
     sen66_args = calls["sen66_register"][0]
     gps_args = calls["gps_register"][0]
     h10_args = calls["h10_register"][0]
+    pacer_args = calls["pacer_register"][0]
 
     assert pulse_args[1] is ingest_state.pulse_latest
     assert pulse_args[2] is ingest_state.pulse_temp_history
@@ -178,6 +195,16 @@ def test_server_passes_shared_ingest_state_to_render_registration(monkeypatch) -
     assert h10_args[11] == {"chart": None, "dev": None, "tpl": None}
     assert h10_args[12] is session
 
+    assert pacer_args[1] is ingest_state.pacer_hr_latest
+    assert pacer_args[2] is ingest_state.pacer_hr_history
+    assert pacer_args[3] is ingest_state.pacer_acc_latest
+    assert pacer_args[4] is ingest_state.pacer_acc_history
+    assert pacer_args[5] is ingest_state.pacer_motion_latest
+    assert pacer_args[6] is ingest_state.pacer_ppi_latest
+    assert pacer_args[7] is ingest_state.pacer_ppi_history
+    assert isinstance(pacer_args[9], _FakeFigureWidget)
+    assert pacer_args[10] == {"chart": None, "dev": None, "tpl": None}
+
 
 def test_server_plotly_template_calc_reads_chart_style(monkeypatch) -> None:
     server_module, calls, _ = _load_server_module(monkeypatch)
@@ -188,8 +215,10 @@ def test_server_plotly_template_calc_reads_chart_style(monkeypatch) -> None:
     sen66_args = calls["sen66_register"][0]
     gps_args = calls["gps_register"][0]
     h10_args = calls["h10_register"][0]
+    pacer_args = calls["pacer_register"][0]
 
     assert pulse_args[0].chart_style() == "plotly_dark"
     assert sen66_args[0].chart_style() == "plotly_dark"
     assert gps_args[0].chart_style() == "plotly_dark"
     assert h10_args[0].chart_style() == "plotly_dark"
+    assert pacer_args[0].chart_style() == "plotly_dark"

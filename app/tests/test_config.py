@@ -82,6 +82,27 @@ def test_gps_devices_match_checked_in_config() -> None:
     }
 
 
+def test_pacer_devices_match_checked_in_config() -> None:
+    assert config.PACER_DEVICES == {
+        "pixel-7:DA2E2324": {
+            "label": "DA2E2324",
+            "device": "pixel-7",
+            "pacer_id": "DA2E2324",
+            "hr": "http://127.0.0.1:8010/pixel-7/pacer/DA2E2324/hr",
+            "acc": "http://127.0.0.1:8010/pixel-7/pacer/DA2E2324/acc",
+            "ppi": "http://127.0.0.1:8010/pixel-7/pacer/DA2E2324/ppi",
+        }
+    }
+    assert config.PACER_DEVICE_OPTIONS == {
+        "pixel-7": {"pixel-7:DA2E2324": "DA2E2324"},
+    }
+    assert config.PACER_DEFAULTS == {
+        "pixel-7": "pixel-7:DA2E2324",
+    }
+    assert config.PACER_ACC_DYNAMIC_WINDOW_S == 1.0
+    assert config.PACER_MOTION_SUBWINDOW_S == 0.2
+
+
 def test_all_devices_and_defaults_match_current_config() -> None:
     assert config.ALL_DEVICES == {
         "10": "RPi4 (192.168.121.10)",
@@ -98,6 +119,10 @@ def test_chart_option_mappings_are_stable() -> None:
     assert config.H10_CHARTS["ecg"] == "ECG (µV)"
     assert config.H10_CHARTS["acc_dyn"] == "Mean Dynamic Acceleration"
     assert config.H10_CHARTS["motion"] == "Acceleration Axes"
+    assert config.PACER_CHARTS["hr"] == "Heart Rate (BPM)"
+    assert config.PACER_CHARTS["ppi"] == "PPI (ms)"
+    assert config.PACER_CHARTS["acc_dyn"] == "Mean Dynamic Acceleration"
+    assert config.PACER_CHARTS["motion"] == "Acceleration Axes"
 
 
 def test_load_raw_config_reads_explicit_path(tmp_path: Path) -> None:
@@ -110,7 +135,9 @@ def test_load_raw_config_reads_explicit_path(tmp_path: Path) -> None:
         '    sen66: {}\n'
         '    gps: {}\n'
         '    h10:\n'
-        '      "strap-a": {}\n',
+        '      "strap-a": {}\n'
+        '    pacer:\n'
+        '      "watch-a": {}\n',
         encoding="utf-8",
     )
 
@@ -121,6 +148,7 @@ def test_load_raw_config_reads_explicit_path(tmp_path: Path) -> None:
     assert loaded["devices"]["12"]["sen66"] == {}
     assert loaded["devices"]["12"]["gps"] == {}
     assert loaded["devices"]["12"]["h10"]["strap-a"] == {}
+    assert loaded["devices"]["12"]["pacer"]["watch-a"] == {}
 
 
 def test_build_settings_derives_urls_from_structured_config() -> None:
@@ -136,6 +164,10 @@ def test_build_settings_derives_urls_from_structured_config() -> None:
                     "h10": {
                         "strap-a": {"label": "Test H10 A"},
                         "strap-b": {},
+                    },
+                    "pacer": {
+                        "watch-a": {"label": "Test Pacer A"},
+                        "watch-b": {},
                     },
                 }
             },
@@ -189,6 +221,31 @@ def test_build_settings_derives_urls_from_structured_config() -> None:
         }
     }
     assert settings["h10_defaults"] == {"12": "12:strap-a"}
+    assert settings["pacer_devices"] == {
+        "12:watch-a": {
+            "label": "Test Pacer A",
+            "device": "12",
+            "pacer_id": "watch-a",
+            "hr": "http://example/12/pacer/watch-a/hr",
+            "acc": "http://example/12/pacer/watch-a/acc",
+            "ppi": "http://example/12/pacer/watch-a/ppi",
+        },
+        "12:watch-b": {
+            "label": "watch-b",
+            "device": "12",
+            "pacer_id": "watch-b",
+            "hr": "http://example/12/pacer/watch-b/hr",
+            "acc": "http://example/12/pacer/watch-b/acc",
+            "ppi": "http://example/12/pacer/watch-b/ppi",
+        },
+    }
+    assert settings["pacer_device_options"] == {
+        "12": {
+            "12:watch-a": "Test Pacer A",
+            "12:watch-b": "watch-b",
+        }
+    }
+    assert settings["pacer_defaults"] == {"12": "12:watch-a"}
     assert settings["all_devices"] == {"12": "Lab Pi"}
     assert settings["all_devices_default"] == "12"
 

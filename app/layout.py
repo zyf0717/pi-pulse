@@ -10,6 +10,7 @@ from app.config import (
     ALL_DEVICES_DEFAULT,
     H10_ACC_DYNAMIC_WINDOW_S,
     H10_CHARTS,
+    PACER_ACC_DYNAMIC_WINDOW_S,
     PACER_CHARTS,
     PULSE_CHARTS,
     SEN66_CHARTS,
@@ -54,8 +55,8 @@ _GPS_CARD_SPECS = [
 
 _PACER_CARD_SPECS = [
     ("Heart Rate", "pacer_hr_val", "pacer_hr_spark", "hr"),
-    ("Acceleration", "pacer_acc_val", "pacer_acc_spark", "acc"),
     ("PPI", "pacer_ppi_val", "pacer_ppi_spark", "ppi"),
+    ("Mean Dynamic Acceleration", "pacer_acc_val", "pacer_acc_spark", "acc_dyn"),
 ]
 
 
@@ -280,7 +281,25 @@ def _gps_cards():
 
 
 def _pacer_cards():
-    return [
+    window_s = f"{PACER_ACC_DYNAMIC_WINDOW_S:g}"
+    tooltip_map = {
+        "tooltip_pacer_acc": _sensor_tooltip(
+            "Mean Dynamic Acceleration",
+            "tooltip_pacer_acc",
+            f"Average movement over the last {window_s} s.",
+            "Baseline tilt/gravity is removed first.",
+            "Higher values mean more motion during that window.",
+        ),
+        "tooltip_pacer_tilt": _sensor_tooltip(
+            "Acceleration Axes",
+            "tooltip_pacer_tilt",
+            "At rest, the combined X/Y/Z acceleration is usually ~1000 mg because of gravity (1g ≈ 9.81 m/s²).",
+            "How the 1000 mg is distributed depends on how the sensor is physically oriented.",
+            "Expanded graphs show recent X-Y, X-Z, and Y-Z acceleration pairs over time.",
+            "They show which direction gravity and motion are acting on the sensor.",
+        ),
+    }
+    cards = [
         _metric_card(
             title,
             value_output_id,
@@ -288,8 +307,27 @@ def _pacer_cards():
             chart_target="pacer_chart",
             chart_value=chart_value,
         )
-        for title, value_output_id, spark_output_id, chart_value in _PACER_CARD_SPECS
+        for title, value_output_id, spark_output_id, chart_value in _PACER_CARD_SPECS[:2]
     ]
+    _, acc_value_output_id, acc_spark_output_id, acc_chart_value = _PACER_CARD_SPECS[2]
+    cards.append(
+        _metric_card(
+            tooltip_map["tooltip_pacer_acc"],
+            acc_value_output_id,
+            acc_spark_output_id,
+            chart_target="pacer_chart",
+            chart_value=acc_chart_value,
+        )
+    )
+    cards.append(
+        _visual_card(
+            tooltip_map["tooltip_pacer_tilt"],
+            "pacer_motion_preview",
+            chart_target="pacer_chart",
+            chart_value="motion",
+        )
+    )
+    return cards
 
 
 def _system_panel():

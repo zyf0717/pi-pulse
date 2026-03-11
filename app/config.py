@@ -90,6 +90,9 @@ def build_settings(raw_config: Mapping) -> dict:
     h10_devices: dict[str, dict] = {}
     h10_device_options: dict[str, dict[str, str]] = {}
     h10_defaults: dict[str, str] = {}
+    pacer_devices: dict[str, dict] = {}
+    pacer_device_options: dict[str, dict[str, str]] = {}
+    pacer_defaults: dict[str, str] = {}
 
     for device_id, value in device_config.items():
         if not isinstance(value, Mapping):
@@ -131,35 +134,64 @@ def build_settings(raw_config: Mapping) -> dict:
             }
 
         h10_config = value.get("h10", {})
-        if not isinstance(h10_config, Mapping):
-            continue
-        options: dict[str, str] = {}
-        for instance_id, instance_value in h10_config.items():
-            instance_label = instance_id
-            if isinstance(instance_value, Mapping) and instance_value.get("label"):
-                instance_label = str(instance_value["label"])
-            key = f"{device_id}:{instance_id}"
-            h10_devices[key] = {
-                "label": instance_label,
-                "device": device_id,
-                "h10_id": instance_id,
-                DEFAULT_STREAM: _relay_url(
-                    relay_base_url,
-                    stream_path("h10", device_id, instance_id=instance_id),
-                ),
-                "ecg": _relay_url(
-                    relay_base_url,
-                    stream_path("h10", device_id, "ecg", instance_id=instance_id),
-                ),
-                "acc": _relay_url(
-                    relay_base_url,
-                    stream_path("h10", device_id, "acc", instance_id=instance_id),
-                ),
-            }
-            options[key] = instance_label
-        if options:
-            h10_device_options[device_id] = options
-            h10_defaults[device_id] = next(iter(options))
+        if isinstance(h10_config, Mapping):
+            options: dict[str, str] = {}
+            for instance_id, instance_value in h10_config.items():
+                instance_label = instance_id
+                if isinstance(instance_value, Mapping) and instance_value.get("label"):
+                    instance_label = str(instance_value["label"])
+                key = f"{device_id}:{instance_id}"
+                h10_devices[key] = {
+                    "label": instance_label,
+                    "device": device_id,
+                    "h10_id": instance_id,
+                    DEFAULT_STREAM: _relay_url(
+                        relay_base_url,
+                        stream_path("h10", device_id, instance_id=instance_id),
+                    ),
+                    "ecg": _relay_url(
+                        relay_base_url,
+                        stream_path("h10", device_id, "ecg", instance_id=instance_id),
+                    ),
+                    "acc": _relay_url(
+                        relay_base_url,
+                        stream_path("h10", device_id, "acc", instance_id=instance_id),
+                    ),
+                }
+                options[key] = instance_label
+            if options:
+                h10_device_options[device_id] = options
+                h10_defaults[device_id] = next(iter(options))
+
+        pacer_config = value.get("pacer", {})
+        if isinstance(pacer_config, Mapping):
+            options: dict[str, str] = {}
+            for instance_id, instance_value in pacer_config.items():
+                instance_label = instance_id
+                if isinstance(instance_value, Mapping) and instance_value.get("label"):
+                    instance_label = str(instance_value["label"])
+                key = f"{device_id}:{instance_id}"
+                pacer_devices[key] = {
+                    "label": instance_label,
+                    "device": device_id,
+                    "pacer_id": instance_id,
+                    "hr": _relay_url(
+                        relay_base_url,
+                        stream_path("pacer", device_id, "hr", instance_id=instance_id),
+                    ),
+                    "acc": _relay_url(
+                        relay_base_url,
+                        stream_path("pacer", device_id, "acc", instance_id=instance_id),
+                    ),
+                    "ppi": _relay_url(
+                        relay_base_url,
+                        stream_path("pacer", device_id, "ppi", instance_id=instance_id),
+                    ),
+                }
+                options[key] = instance_label
+            if options:
+                pacer_device_options[device_id] = options
+                pacer_defaults[device_id] = next(iter(options))
 
     all_devices_default = "11" if "11" in all_devices else next(iter(all_devices), None)
     return {
@@ -169,6 +201,9 @@ def build_settings(raw_config: Mapping) -> dict:
         "h10_devices": h10_devices,
         "h10_device_options": h10_device_options,
         "h10_defaults": h10_defaults,
+        "pacer_devices": pacer_devices,
+        "pacer_device_options": pacer_device_options,
+        "pacer_defaults": pacer_defaults,
         "all_devices": all_devices,
         "all_devices_default": all_devices_default,
     }
@@ -202,9 +237,14 @@ GPS_DEVICES = _SETTINGS["gps_devices"]
 H10_DEVICES = _SETTINGS["h10_devices"]
 H10_DEVICE_OPTIONS = _SETTINGS["h10_device_options"]
 H10_DEFAULTS = _SETTINGS["h10_defaults"]
+PACER_DEVICES = _SETTINGS["pacer_devices"]
+PACER_DEVICE_OPTIONS = _SETTINGS["pacer_device_options"]
+PACER_DEFAULTS = _SETTINGS["pacer_defaults"]
 ALL_DEVICES = _SETTINGS["all_devices"]
 ALL_DEVICES_DEFAULT = _SETTINGS["all_devices_default"]
 H10_ACC_DYNAMIC_WINDOW_S = 0.5
+PACER_ACC_DYNAMIC_WINDOW_S = 1.0
+PACER_MOTION_SUBWINDOW_S = 0.2
 
 PULSE_CHARTS = {
     "cpu": "CPU Usage (%)",
@@ -232,6 +272,7 @@ H10_CHARTS = {
 
 PACER_CHARTS = {
     "hr": "Heart Rate (BPM)",
-    "acc": "Acceleration (mg)",
     "ppi": "PPI (ms)",
+    "acc_dyn": "Mean Dynamic Acceleration",
+    "motion": "Acceleration Axes",
 }

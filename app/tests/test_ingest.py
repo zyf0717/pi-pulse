@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from types import ModuleType
 import importlib.util
@@ -70,7 +71,19 @@ def _load_ingest_module(monkeypatch):
             "acc": "http://h10-11/acc",
         }
     }
+    fake_config.PACER_DEVICES = {
+        "pixel-7:DA2E2324": {
+            "label": "DA2E2324",
+            "device": "pixel-7",
+            "pacer_id": "DA2E2324",
+            "hr": "http://pacer-pixel-7/hr",
+            "acc": "http://pacer-pixel-7/acc",
+            "ppi": "http://pacer-pixel-7/ppi",
+        }
+    }
     fake_config.H10_ACC_DYNAMIC_WINDOW_S = 0.5
+    fake_config.PACER_ACC_DYNAMIC_WINDOW_S = 1.0
+    fake_config.PACER_MOTION_SUBWINDOW_S = 0.2
 
     fake_shiny = ModuleType("shiny")
 
@@ -133,8 +146,8 @@ def test_ensure_global_ingest_started_starts_consumers_once(monkeypatch) -> None
     ingest_module.ensure_global_ingest_started(state)
 
     assert state.started is True
-    assert len(state.tasks) == 7
-    assert len(calls["stream_consumer"]) == 7
+    assert len(state.tasks) == 10
+    assert len(calls["stream_consumer"]) == 10
     assert [call["label"] for call in calls["stream_consumer"]] == [
         "pulse-10",
         "sen66-11",
@@ -143,6 +156,9 @@ def test_ensure_global_ingest_started_starts_consumers_once(monkeypatch) -> None
         "h10-11:6FFF5628",
         "h10-ecg-11:6FFF5628",
         "h10-acc-11:6FFF5628",
+        "pacer-hr-pixel-7:DA2E2324",
+        "pacer-acc-pixel-7:DA2E2324",
+        "pacer-ppi-pixel-7:DA2E2324",
     ]
     assert [call["url"] for call in calls["stream_consumer"]] == [
         "http://pulse-10",
@@ -152,8 +168,11 @@ def test_ensure_global_ingest_started_starts_consumers_once(monkeypatch) -> None
         "http://h10-11",
         "http://h10-11/ecg",
         "http://h10-11/acc",
+        "http://pacer-pixel-7/hr",
+        "http://pacer-pixel-7/acc",
+        "http://pacer-pixel-7/ppi",
     ]
-    assert len(calls["create_task"]) == 7
+    assert len(calls["create_task"]) == 10
 
 
 def test_dead_consumer_invalidates_task_set_and_next_ensure_restarts(monkeypatch) -> None:
@@ -172,9 +191,9 @@ def test_dead_consumer_invalidates_task_set_and_next_ensure_restarts(monkeypatch
     ingest_module.ensure_global_ingest_started(state)
 
     assert state.started is True
-    assert len(state.tasks) == 7
+    assert len(state.tasks) == 10
     assert state.tasks != first_generation
-    assert len(calls["create_task"]) == 14
+    assert len(calls["create_task"]) == 20
 
 
 def test_build_ingest_state_initial_latest_values_are_empty(monkeypatch) -> None:
@@ -190,6 +209,10 @@ def test_build_ingest_state_initial_latest_values_are_empty(monkeypatch) -> None
     assert state.h10_ecg_latest["11:6FFF5628"]() == {}
     assert state.h10_acc_latest["11:6FFF5628"]() == {}
     assert state.h10_motion_latest["11:6FFF5628"]() == {}
+    assert state.pacer_hr_latest["pixel-7:DA2E2324"]() == {}
+    assert state.pacer_acc_latest["pixel-7:DA2E2324"]() == {}
+    assert state.pacer_motion_latest["pixel-7:DA2E2324"]() == {}
+    assert state.pacer_ppi_latest["pixel-7:DA2E2324"]() == {}
 
 
 def test_normalize_h10_sample_handles_common_ble_field_names(monkeypatch) -> None:
@@ -242,6 +265,43 @@ def test_normalize_h10_acc_chunk_filters_invalid_samples_and_defaults_rate(
     }
 
 
+def test_normalize_pacer_ppi_chunk_filters_invalid_samples(monkeypatch) -> None:
+    ingest_module, _ = _load_ingest_module(monkeypatch)
+
+    normalized = ingest_module.normalize_pacer_ppi_chunk(
+        {
+            "samples": [
+                {
+                    "ppi_ms": 841,
+                    "error_estimate_ms": 190,
+                    "hr": 0,
+                    "blocker_bit": True,
+                    "skin_contact_status": True,
+                    "skin_contact_supported": True,
+                    "timestamp_ns": 826560858827000000,
+                },
+                {"ppi_ms": "bad"},
+            ],
+            "timestamp": "2026-03-11T08:14:28.806500Z",
+        }
+    )
+
+    assert normalized == {
+        "samples": [
+            {
+                "ppi_ms": 841.0,
+                "error_estimate_ms": 190.0,
+                "heart_rate_bpm": 0.0,
+                "blocker_bit": True,
+                "skin_contact_status": True,
+                "skin_contact_supported": True,
+                "timestamp_ns": 826560858827000000,
+            }
+        ],
+        "timestamp": "2026-03-11T08:14:28.806500Z",
+    }
+
+
 def test_mean_dynamic_acceleration_uses_window_mean_as_static_component(
     monkeypatch,
 ) -> None:
@@ -255,3 +315,22 @@ def test_mean_dynamic_acceleration_uses_window_mean_as_static_component(
     )
 
     assert mean_dynamic == 1.0
+
+
+def test_pacer_acc_uses_subwindows_for_motion_trail(monkeypatch) -> None:
+    ingest_module, _ = _load_ingest_module(monkeypatch)
+    state = ingest_module.build_ingest_state()
+
+    packet = {
+        "samples_mg": [
+            {"x_mg": float(index), "y_mg": 0.0, "z_mg": 1000.0}
+            for index in range(52)
+        ],
+        "sample_rate_hz": 50,
+    }
+
+    asyncio.run(ingest_module._on_pacer_acc(state, "pixel-7:DA2E2324", packet))
+
+    trail_points = state.pacer_motion_latest["pixel-7:DA2E2324"]()["trail_points"]
+    assert len(trail_points) == 6
+    assert state.pacer_acc_latest["pixel-7:DA2E2324"]()["sample_rate_hz"] == 50

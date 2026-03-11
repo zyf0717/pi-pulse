@@ -61,21 +61,28 @@ class _FakeInput:
         *,
         device: str,
         h10_device: str | None = None,
+        pacer_device: str | None = None,
         pulse_chart: str = "temp",
         sen66_chart: str = "co2",
         h10_chart: str = "bpm",
+        pacer_chart: str = "hr",
     ):
         self._device = device
         self._h10_device = h10_device
+        self._pacer_device = pacer_device
         self._pulse_chart = pulse_chart
         self._sen66_chart = sen66_chart
         self._h10_chart = h10_chart
+        self._pacer_chart = pacer_chart
 
     def device(self) -> str:
         return self._device
 
     def h10_device(self) -> str | None:
         return self._h10_device
+
+    def pacer_device(self) -> str | None:
+        return self._pacer_device
 
     def pulse_chart(self) -> str:
         return self._pulse_chart
@@ -85,6 +92,9 @@ class _FakeInput:
 
     def h10_chart(self) -> str:
         return self._h10_chart
+
+    def pacer_chart(self) -> str:
+        return self._pacer_chart
 
 
 class _FakeSession:
@@ -153,6 +163,33 @@ def _load_render_module(monkeypatch, filename: str, config_attrs: dict):
             }
             config_attrs = dict(config_attrs)
             config_attrs["H10_DEFAULTS"] = defaults
+
+    if "PACER_DEVICES" in config_attrs:
+        pacer_devices = config_attrs["PACER_DEVICES"]
+        if "PACER_DEVICE_OPTIONS" not in config_attrs:
+            options: dict[str, dict[str, str]] = {}
+            defaults: dict[str, str] = {}
+            for stream_key, entry in pacer_devices.items():
+                node_key = entry.get("device")
+                if not node_key:
+                    node_key = (
+                        stream_key.split(":", 1)[0]
+                        if ":" in stream_key
+                        else str(stream_key)
+                    )
+                label = entry.get("label", str(stream_key))
+                options.setdefault(node_key, {})[stream_key] = label
+                defaults.setdefault(node_key, stream_key)
+            config_attrs = dict(config_attrs)
+            config_attrs["PACER_DEVICE_OPTIONS"] = options
+            config_attrs["PACER_DEFAULTS"] = defaults
+        elif "PACER_DEFAULTS" not in config_attrs:
+            defaults = {
+                node_key: next(iter(options), None)
+                for node_key, options in config_attrs["PACER_DEVICE_OPTIONS"].items()
+            }
+            config_attrs = dict(config_attrs)
+            config_attrs["PACER_DEFAULTS"] = defaults
 
     fake_shiny = ModuleType("shiny")
     fake_shiny.reactive = _FakeReactive(registry)
@@ -600,6 +637,119 @@ def test_gps_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> None
     assert registry.ui["gps_accuracy_spark"]() == "BLANK_SPARK"
     assert registry.ui["gps_altitude_spark"]() == "BLANK_SPARK"
     assert registry.ui["gps_speed_spark"]() == "BLANK_SPARK"
+
+
+def test_pacer_value_boxes_format_current_snapshot(monkeypatch) -> None:
+    module, registry = _load_render_module(
+        monkeypatch,
+        "pacer.py",
+        {
+            "PACER_CHARTS": {
+                "hr": "Heart Rate (BPM)",
+                "ppi": "PPI (ms)",
+                "acc_dyn": "Mean Dynamic Acceleration",
+                "motion": "Acceleration Axes",
+            },
+            "PACER_DEVICES": {
+                "pixel-7:DA2E2324": {
+                    "label": "DA2E2324",
+                    "device": "pixel-7",
+                    "pacer_id": "DA2E2324",
+                    "hr": "http://pacer-pixel-7/hr",
+                    "acc": "http://pacer-pixel-7/acc",
+                    "ppi": "http://pacer-pixel-7/ppi",
+                }
+            },
+        },
+    )
+    input_obj = _FakeInput(device="pixel-7", pacer_chart="motion")
+    widget = _FakeFigureWidget()
+    state = {"chart": None, "dev": None, "tpl": None}
+    module.register_pacer_renders(
+        input_obj,
+        {"pixel-7:DA2E2324": _FakeValue({"heart_rate_bpm": 62})},
+        {"pixel-7:DA2E2324": deque([(1, {"heart_rate_bpm": 60}), (2, {"heart_rate_bpm": 62})])},
+        {"pixel-7:DA2E2324": _FakeValue({"mean_dynamic_accel_mg": 18})},
+        {"pixel-7:DA2E2324": deque([(1, {"mean_dynamic_accel_mg": 15}), (2, {"mean_dynamic_accel_mg": 18})])},
+        {"pixel-7:DA2E2324": _FakeValue({"trail_points": [(0, 0, 1000), (15, 20, 980)]})},
+        {"pixel-7:DA2E2324": _FakeValue({"ppi_ms": 841})},
+        {"pixel-7:DA2E2324": deque([(1, {"ppi_ms": 860}), (2, {"ppi_ms": 841})])},
+        lambda: "plotly_dark",
+        widget,
+        state,
+    )
+
+    assert registry.text["pacer_hr_val"]() == "62 bpm"
+    assert registry.text["pacer_acc_val"]() == "18 mg"
+    assert registry.text["pacer_ppi_val"]() == "841 ms"
+    assert registry.ui["pacer_hr_spark"]() == "SPARK:['60 bpm', '62 bpm']"
+    assert registry.ui["pacer_acc_spark"]() == "SPARK:['15 mg', '18 mg']"
+    assert registry.ui["pacer_ppi_spark"]() == "SPARK:['860 ms', '841 ms']"
+    motion_preview = registry.ui["pacer_motion_preview"]()
+    assert ">X<" in motion_preview
+    assert ">Y<" in motion_preview
+    selector = registry.ui["pacer_device_selector"]()
+    assert selector["args"][0] == "pacer_device"
+    assert "polyline" in registry.ui["pacer_detail_view"]()
+    registry.effects["_update_pacer_chart"]()
+    assert state == {"chart": None, "dev": None, "tpl": None}
+
+    input_obj._pacer_chart = "acc_dyn"
+    registry.effects["_update_pacer_chart"]()
+    assert state == {"chart": "acc_dyn", "dev": "pixel-7:DA2E2324", "tpl": "plotly_dark"}
+    assert widget.data[0].name == "Mean Dynamic Acceleration"
+
+
+def test_pacer_invalid_device_returns_na_and_empty_sparklines(monkeypatch) -> None:
+    module, registry = _load_render_module(
+        monkeypatch,
+        "pacer.py",
+        {
+            "PACER_CHARTS": {
+                "hr": "Heart Rate (BPM)",
+                "ppi": "PPI (ms)",
+                "acc_dyn": "Mean Dynamic Acceleration",
+                "motion": "Acceleration Axes",
+            },
+            "PACER_DEVICES": {
+                "pixel-7:DA2E2324": {
+                    "label": "DA2E2324",
+                    "device": "pixel-7",
+                    "pacer_id": "DA2E2324",
+                    "hr": "http://pacer-pixel-7/hr",
+                    "acc": "http://pacer-pixel-7/acc",
+                    "ppi": "http://pacer-pixel-7/ppi",
+                }
+            },
+        },
+    )
+    input_obj = _FakeInput(device="11")
+    widget = _FakeFigureWidget()
+    state = {"chart": None, "dev": None, "tpl": None}
+    module.register_pacer_renders(
+        input_obj,
+        {"pixel-7:DA2E2324": _FakeValue({"heart_rate_bpm": 62})},
+        {"pixel-7:DA2E2324": deque()},
+        {"pixel-7:DA2E2324": _FakeValue({"mean_dynamic_accel_mg": 18})},
+        {"pixel-7:DA2E2324": deque()},
+        {"pixel-7:DA2E2324": _FakeValue({})},
+        {"pixel-7:DA2E2324": _FakeValue({"ppi_ms": 841})},
+        {"pixel-7:DA2E2324": deque()},
+        lambda: "plotly_dark",
+        widget,
+        state,
+    )
+
+    assert registry.text["pacer_hr_val"]() == "N/A"
+    assert registry.text["pacer_acc_val"]() == "N/A"
+    assert registry.text["pacer_ppi_val"]() == "N/A"
+    assert registry.ui["pacer_hr_spark"]() == "BLANK_SPARK"
+    assert registry.ui["pacer_acc_spark"]() == "BLANK_SPARK"
+    assert registry.ui["pacer_ppi_spark"]() == "BLANK_SPARK"
+    assert "N/A" in registry.ui["pacer_motion_preview"]()
+    assert "BLANK_SPARK" in registry.ui["pacer_motion_preview"]()
+    registry.effects["_update_pacer_chart"]()
+    assert widget.layout.annotations[0]["text"] == "No pacer data is available for this device."
 
 
 def test_h10_value_boxes_format_current_snapshot(monkeypatch) -> None:

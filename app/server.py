@@ -5,6 +5,7 @@ from shiny import reactive
 from app.ingest import GLOBAL_INGEST, ensure_global_ingest_started
 from app.renders.gps import register_gps_renders
 from app.renders.h10 import register_h10_renders
+from app.renders.pacer import register_pacer_renders
 from app.renders.pulse import register_pulse_renders
 from app.renders.sen66 import register_sen66_renders
 
@@ -63,4 +64,20 @@ def server(input, output, session):
         h10_widget,
         h10_state,
         session,
+    )
+
+    pacer_widget = go.FigureWidget(layout=dict(autosize=True, height=400))
+    pacer_state: dict = {"chart": None, "dev": None, "tpl": None}
+    register_pacer_renders(
+        input,
+        GLOBAL_INGEST.pacer_hr_latest,
+        GLOBAL_INGEST.pacer_hr_history,
+        GLOBAL_INGEST.pacer_acc_latest,
+        GLOBAL_INGEST.pacer_acc_history,
+        GLOBAL_INGEST.pacer_motion_latest,
+        GLOBAL_INGEST.pacer_ppi_latest,
+        GLOBAL_INGEST.pacer_ppi_history,
+        plotly_tpl,
+        pacer_widget,
+        pacer_state,
     )

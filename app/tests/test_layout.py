@@ -62,6 +62,7 @@ def _load_layout_module(monkeypatch):
     fake_config.ALL_DEVICES = {"10": "10 (192.168.121.10)", "11": "11 (192.168.121.11)"}
     fake_config.ALL_DEVICES_DEFAULT = "11"
     fake_config.H10_ACC_DYNAMIC_WINDOW_S = 0.5
+    fake_config.PACER_ACC_DYNAMIC_WINDOW_S = 1.0
     fake_config.PULSE_CHARTS = {
         "cpu": "CPU Usage (%)",
         "cpu_freq": "CPU Frequency (MHz)",
@@ -85,8 +86,9 @@ def _load_layout_module(monkeypatch):
     }
     fake_config.PACER_CHARTS = {
         "hr": "Heart Rate (BPM)",
-        "acc": "Acceleration (mg)",
         "ppi": "PPI (ms)",
+        "acc_dyn": "Mean Dynamic Acceleration",
+        "motion": "Acceleration Axes",
     }
 
     monkeypatch.setitem(sys.modules, "shiny", fake_shiny)
@@ -212,18 +214,25 @@ def test_pacer_cards_match_chart_mapping(monkeypatch) -> None:
 
     cards = module._pacer_cards()
 
-    assert len(cards) == 3
+    assert len(cards) == 4
     assert [card["kwargs"]["data-chart-target"] for card in cards] == [
         "pacer_chart"
-    ] * 3
+    ] * 4
     assert [card["kwargs"]["data-chart-value"] for card in cards] == [
         "hr",
-        "acc",
         "ppi",
+        "acc_dyn",
+        "motion",
     ]
     first_header = cards[0]["args"][0]["args"][0]
     assert first_header["tag"] == "card_header"
     assert first_header["args"][0] == "Heart Rate"
+    accel_header = cards[2]["args"][0]["args"][0]
+    assert accel_header["args"][0]["tag"] == "tooltip"
+    assert "Average movement over the last 1 s." in accel_header["args"][0]["args"]
+    tilt_header = cards[3]["args"][0]["args"][0]
+    assert tilt_header["args"][0]["tag"] == "tooltip"
+    assert tilt_header["args"][0]["args"][0]["args"][0] == "Acceleration Axes "
 
 
 def test_h10_panel_includes_stream_selector_placeholder(monkeypatch) -> None:
