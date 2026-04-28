@@ -412,7 +412,7 @@ def _pacer_panel():
     )
 
 
-app_ui = ui.layout_sidebar(
+app_ui = ui.page_sidebar(
     ui.sidebar(
         ui.input_select(
             "device",
