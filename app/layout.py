@@ -307,7 +307,9 @@ def _pacer_cards():
             chart_target="pacer_chart",
             chart_value=chart_value,
         )
-        for title, value_output_id, spark_output_id, chart_value in _PACER_CARD_SPECS[:2]
+        for title, value_output_id, spark_output_id, chart_value in _PACER_CARD_SPECS[
+            :2
+        ]
     ]
     _, acc_value_output_id, acc_spark_output_id, acc_chart_value = _PACER_CARD_SPECS[2]
     cards.append(
@@ -410,7 +412,7 @@ def _pacer_panel():
     )
 
 
-app_ui = ui.page_sidebar(
+app_ui = ui.layout_sidebar(
     ui.sidebar(
         ui.input_select(
             "device",

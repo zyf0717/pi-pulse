@@ -15,7 +15,7 @@ def _tag_factory(name: str):
 
 def _load_layout_module(monkeypatch):
     fake_ui = SimpleNamespace(
-        page_sidebar=_tag_factory("page_sidebar"),
+        layout_sidebar=_tag_factory("layout_sidebar"),
         head_content=_tag_factory("head_content"),
         sidebar=_tag_factory("sidebar"),
         include_css=_tag_factory("include_css"),
@@ -185,7 +185,10 @@ def test_h10_cards_match_chart_mapping(monkeypatch) -> None:
     assert accel_header["args"][0]["tag"] == "tooltip"
     assert "Average movement over the last 0.5 s." in accel_header["args"][0]["args"]
     assert "Baseline tilt/gravity is removed first." in accel_header["args"][0]["args"]
-    assert "Higher values mean more motion during that window." in accel_header["args"][0]["args"]
+    assert (
+        "Higher values mean more motion during that window."
+        in accel_header["args"][0]["args"]
+    )
     tilt_header = cards[4]["args"][0]["args"][0]
     assert tilt_header["args"][0]["tag"] == "tooltip"
     assert tilt_header["args"][0]["args"][0]["tag"] == "span"
@@ -281,7 +284,9 @@ def test_app_ui_includes_gps_panel(monkeypatch) -> None:
     module = _load_layout_module(monkeypatch)
 
     navset = module.app_ui["args"][2]
-    panel_titles = [panel["args"][0] for panel in navset["args"] if isinstance(panel, dict)]
+    panel_titles = [
+        panel["args"][0] for panel in navset["args"] if isinstance(panel, dict)
+    ]
 
     assert "GPS" in panel_titles
     assert "Pacer" in panel_titles
